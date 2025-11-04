@@ -1,0 +1,1365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Beneteau Oceanis 37 - Systems Documentation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --navy: #1a3a52;
+            --ocean-blue: #2c5f7c;
+            --light-blue: #4a90b5;
+            --sand: #f4e8d8;
+            --white: #ffffff;
+            --grey: #6b7280;
+            --light-grey: #e5e7eb;
+            --red: #dc2626;
+            --green: #059669;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, var(--sand) 0%, #e8dcc8 100%);
+            color: var(--navy);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Header */
+        header {
+            background: linear-gradient(135deg, var(--navy) 0%, var(--ocean-blue) 100%);
+            color: var(--white);
+            padding: 30px 20px;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+
+        header h1 {
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+
+        header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        /* Stats Dashboard */
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: var(--white);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+
+        .stat-card h3 {
+            font-size: 2rem;
+            color: var(--ocean-blue);
+            margin-bottom: 5px;
+        }
+
+        .stat-card p {
+            color: var(--grey);
+            font-size: 0.9rem;
+        }
+
+        /* Controls */
+        .controls {
+            background: var(--white);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .search-box {
+            flex: 1;
+            min-width: 250px;
+        }
+
+        .search-box input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid var(--light-grey);
+            border-radius: 6px;
+            font-size: 1rem;
+        }
+
+        .search-box input:focus {
+            outline: none;
+            border-color: var(--ocean-blue);
+        }
+
+        .filter-box select {
+            padding: 12px 20px;
+            border: 2px solid var(--light-grey);
+            border-radius: 6px;
+            font-size: 1rem;
+            background: var(--white);
+            cursor: pointer;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: 500;
+        }
+
+        .btn-primary {
+            background: var(--ocean-blue);
+            color: var(--white);
+        }
+
+        .btn-primary:hover {
+            background: var(--navy);
+        }
+
+        .btn-secondary {
+            background: var(--light-grey);
+            color: var(--navy);
+        }
+
+        .btn-secondary:hover {
+            background: var(--grey);
+            color: var(--white);
+        }
+
+        .btn-danger {
+            background: var(--red);
+            color: var(--white);
+        }
+
+        .btn-danger:hover {
+            background: #b91c1c;
+        }
+
+        .btn-success {
+            background: var(--green);
+            color: var(--white);
+        }
+
+        .btn-success:hover {
+            background: #047857;
+        }
+
+        .btn-small {
+            padding: 8px 16px;
+            font-size: 0.9rem;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .tab {
+            padding: 12px 24px;
+            background: var(--white);
+            border: 2px solid var(--light-grey);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: 500;
+        }
+
+        .tab:hover {
+            background: var(--light-grey);
+        }
+
+        .tab.active {
+            background: var(--ocean-blue);
+            color: var(--white);
+            border-color: var(--ocean-blue);
+        }
+
+        /* Systems Grid */
+        .systems-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .system-card {
+            background: var(--white);
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+            transition: transform 0.2s, box-shadow 0.2s;
+            cursor: pointer;
+        }
+
+        .system-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .card-header {
+            background: var(--ocean-blue);
+            color: var(--white);
+            padding: 15px;
+        }
+
+        .card-header h3 {
+            font-size: 1.2rem;
+            margin-bottom: 5px;
+        }
+
+        .card-header .category-badge {
+            display: inline-block;
+            background: rgba(255,255,255,0.2);
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+        }
+
+        .card-body {
+            padding: 15px;
+        }
+
+        .card-field {
+            margin-bottom: 12px;
+        }
+
+        .card-field label {
+            display: block;
+            font-weight: 600;
+            color: var(--grey);
+            font-size: 0.85rem;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+        }
+
+        .card-field p {
+            color: var(--navy);
+            line-height: 1.5;
+        }
+
+        .card-image {
+            width: 100%;
+            max-height: 200px;
+            object-fit: cover;
+            margin-top: 10px;
+            border-radius: 4px;
+        }
+
+        .card-actions {
+            padding: 15px;
+            border-top: 1px solid var(--light-grey);
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            overflow-y: auto;
+        }
+
+        .modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .modal-content {
+            background: var(--white);
+            border-radius: 8px;
+            width: 100%;
+            max-width: 800px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            background: var(--ocean-blue);
+            color: var(--white);
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h2 {
+            font-size: 1.5rem;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            color: var(--white);
+            font-size: 1.8rem;
+            cursor: pointer;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-body {
+            padding: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: var(--navy);
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid var(--light-grey);
+            border-radius: 6px;
+            font-size: 1rem;
+            font-family: inherit;
+        }
+
+        .form-group textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: var(--ocean-blue);
+        }
+
+        .modal-footer {
+            padding: 20px;
+            border-top: 1px solid var(--light-grey);
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--grey);
+        }
+
+        .empty-state svg {
+            width: 100px;
+            height: 100px;
+            margin-bottom: 20px;
+            opacity: 0.3;
+        }
+
+        .empty-state h3 {
+            font-size: 1.5rem;
+            margin-bottom: 10px;
+        }
+
+        /* Print Styles */
+        @media print {
+            body {
+                background: white;
+            }
+
+            header {
+                background: var(--navy);
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+
+            .controls,
+            .stats,
+            .btn,
+            .card-actions,
+            .modal {
+                display: none !important;
+            }
+
+            .systems-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .system-card {
+                page-break-inside: avoid;
+                box-shadow: none;
+                border: 1px solid #ddd;
+                margin-bottom: 20px;
+            }
+
+            .card-header {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+        }
+
+        /* Mobile Responsive */
+        @media (max-width: 768px) {
+            header h1 {
+                font-size: 1.5rem;
+            }
+
+            header p {
+                font-size: 1rem;
+            }
+
+            .systems-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .controls-row {
+                flex-direction: column;
+            }
+
+            .tabs {
+                flex-direction: column;
+            }
+
+            .tab {
+                text-align: center;
+            }
+
+            .modal-content {
+                max-height: 95vh;
+            }
+        }
+
+        /* File input custom styling */
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+            width: 100%;
+        }
+
+        .file-input-wrapper input[type=file] {
+            position: absolute;
+            left: -9999px;
+        }
+
+        .file-input-label {
+            display: block;
+            padding: 12px;
+            background: var(--light-grey);
+            border: 2px solid var(--light-grey);
+            border-radius: 6px;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.3s;
+        }
+
+        .file-input-label:hover {
+            background: var(--grey);
+            color: var(--white);
+        }
+
+        .image-preview {
+            margin-top: 10px;
+            max-width: 100%;
+            max-height: 200px;
+            border-radius: 4px;
+            display: none;
+        }
+
+        .image-preview.active {
+            display: block;
+        }
+
+        /* Loading indicator */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--grey);
+        }
+
+        /* Hidden */
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>⚓ Beneteau Oceanis 37</h1>
+        <p>2012 Model - Systems Documentation & Maintenance Guide</p>
+    </header>
+
+    <div class="container">
+        <!-- Stats Dashboard -->
+        <div class="stats">
+            <div class="stat-card">
+                <h3 id="totalSystems">0</h3>
+                <p>Total Systems</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="categoriesCount">6</h3>
+                <p>Categories</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="lastUpdated">-</h3>
+                <p>Last Updated</p>
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="controls">
+            <div class="controls-row">
+                <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="🔍 Search systems, parts, locations...">
+                </div>
+                <div class="filter-box">
+                    <select id="categoryFilter">
+                        <option value="all">All Categories</option>
+                        <option value="Engine">Engine & Propulsion</option>
+                        <option value="Fluids">Fluid Systems</option>
+                        <option value="Electrical">Electrical</option>
+                        <option value="Rigging">Rigging & Sails</option>
+                        <option value="Safety">Safety & Steering</option>
+                        <option value="Hull">Hull & Structure</option>
+                    </select>
+                </div>
+            </div>
+            <div class="controls-row">
+                <button class="btn btn-primary" onclick="openAddModal()">+ Add New System</button>
+                <button class="btn btn-secondary" onclick="exportData()">💾 Export to JSON</button>
+                <button class="btn btn-secondary" onclick="importData()">📁 Import from JSON</button>
+                <button class="btn btn-secondary" onclick="window.print()">🖨️ Print</button>
+            </div>
+        </div>
+
+        <!-- Category Tabs -->
+        <div class="tabs">
+            <div class="tab active" data-category="all" onclick="filterByCategory('all')">All Systems</div>
+            <div class="tab" data-category="Engine" onclick="filterByCategory('Engine')">Engine</div>
+            <div class="tab" data-category="Fluids" onclick="filterByCategory('Fluids')">Fluids</div>
+            <div class="tab" data-category="Electrical" onclick="filterByCategory('Electrical')">Electrical</div>
+            <div class="tab" data-category="Rigging" onclick="filterByCategory('Rigging')">Rigging</div>
+            <div class="tab" data-category="Safety" onclick="filterByCategory('Safety')">Safety</div>
+            <div class="tab" data-category="Hull" onclick="filterByCategory('Hull')">Hull</div>
+        </div>
+
+        <!-- Systems Grid -->
+        <div id="systemsGrid" class="systems-grid">
+            <!-- Cards will be dynamically inserted here -->
+        </div>
+
+        <!-- Empty State -->
+        <div id="emptyState" class="empty-state hidden">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+            <h3>No systems found</h3>
+            <p>Try adjusting your search or filter criteria</p>
+        </div>
+    </div>
+
+    <!-- Add/Edit Modal -->
+    <div id="systemModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">Add New System</h2>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="systemForm">
+                    <input type="hidden" id="systemId">
+
+                    <div class="form-group">
+                        <label for="category">Category *</label>
+                        <select id="category" required>
+                            <option value="">Select a category</option>
+                            <option value="Engine">Engine & Propulsion</option>
+                            <option value="Fluids">Fluid Systems</option>
+                            <option value="Electrical">Electrical</option>
+                            <option value="Rigging">Rigging & Sails</option>
+                            <option value="Safety">Safety & Steering</option>
+                            <option value="Hull">Hull & Structure</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="name">System Name *</label>
+                        <input type="text" id="name" required placeholder="e.g., Main Engine">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="location">Location *</label>
+                        <input type="text" id="location" required placeholder="e.g., Engine compartment">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="specifications">Specifications</label>
+                        <textarea id="specifications" placeholder="Make/Model, capacity, ratings, etc."></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="partNumbers">Part Numbers</label>
+                        <textarea id="partNumbers" placeholder="Part numbers and codes"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="notes">Important Notes</label>
+                        <textarea id="notes" placeholder="Maintenance notes, warnings, etc."></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="imageUpload">System Image (Optional)</label>
+                        <div class="file-input-wrapper">
+                            <input type="file" id="imageUpload" accept="image/*" onchange="previewImage(event)">
+                            <label for="imageUpload" class="file-input-label">📷 Choose Image</label>
+                        </div>
+                        <img id="imagePreview" class="image-preview" alt="Preview">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveSystem()">Save System</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- View Details Modal -->
+    <div id="detailsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="detailsTitle">System Details</h2>
+                <button class="close-btn" onclick="closeDetailsModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="detailsContent">
+                <!-- Details will be inserted here -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeDetailsModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden file input for import -->
+    <input type="file" id="importFile" accept=".json" style="display: none;" onchange="handleImport(event)">
+
+    <script>
+        // Data structure
+        let systems = [];
+        let currentEditId = null;
+
+        // Initial data
+        const initialData = [
+            {
+                id: 'sys_001',
+                category: 'Engine',
+                name: 'Main Engine',
+                location: 'Engine compartment (Access via companionway w/ 2 gas pistons, or aft cabins/washroom)',
+                specifications: 'Make/Type: Yanmar Diesel, 4-stroke, vertical, water-cooled\nModel: 3YM30 (or 3YM30C)\nHP: 29 HP\nContinuous Rating: 20.1 kW (27.3 PS) / 3489 min⁻¹\nCylinders: 3\nCooling: Fresh water cooling with heat exchanger (Filtered sea water cooling)',
+                partNumbers: 'N/A',
+                notes: 'Engine installations with serial numbers lower than E05566 may be affected by overheating above 2800 RPM, requiring a redesigned heat exchanger core and hose alignment fix. Use only Yanmar genuine parts for repairs.',
+                image: ''
+            },
+            {
+                id: 'sys_002',
+                category: 'Engine',
+                name: 'Marine Gear/Sail Drive',
+                location: 'Attached to engine (Aft)',
+                specifications: 'Standard Marine Gear Model: KM2P-1\nOptional Sail Drive Model: SD20\nKM2P-1 Lubricating Oil Capacity: 0.30 L (0.64 pint)\nKM2P-1 Lubricating Oil: API CC class, SAE #10W30\nReduction Ratio (F/R) KM2P-1: 2.21/3.06, 2.62/3.06, or 3.22/3.06',
+                partNumbers: 'KM2P-1, SD20',
+                notes: 'The parts catalog for the 3YM30 engine does not cover the reduction reverser and outdrive, which require separate catalogs. Sail drive oil capacity (SD20) is 2.2 L (4.7 quart).',
+                image: ''
+            },
+            {
+                id: 'sys_003',
+                category: 'Engine',
+                name: 'Standard Alternator',
+                location: 'Mounted on cylinder block',
+                specifications: 'Voltage: 12V\nNominal Output: 60A\nModel: LR160-741 (HITACHI)\nWeight: 4.2 kg',
+                partNumbers: 'Yanmar Code: 128271-77200',
+                notes: 'Serves to keep the battery constantly charged.',
+                image: ''
+            },
+            {
+                id: 'sys_004',
+                category: 'Engine',
+                name: 'Optional Alternator',
+                location: 'Engine',
+                specifications: 'Voltage: 12V\nNominal Output: 80A\nModel: LR180-03C (HITACHI)\nWeight: 5.4 kg',
+                partNumbers: 'Yanmar Code: 119573-77201',
+                notes: 'Provides higher output capacity.',
+                image: ''
+            },
+            {
+                id: 'sys_005',
+                category: 'Engine',
+                name: 'Engine Lube Oil Filter',
+                location: 'Cylinder block',
+                specifications: 'Applicable to 3YM30, 3YM20, 2YM15 models',
+                partNumbers: 'Part No.: 119305-35150',
+                notes: 'Tightening torque is 20–24 N·m (177–212 lb-in).',
+                image: ''
+            },
+            {
+                id: 'sys_006',
+                category: 'Fluids',
+                name: 'Diesel Fuel Tank',
+                location: 'Under starboard aft berth',
+                specifications: 'Capacity: 130 L / 34 US Gal\nMaterial: Rotation moulded diesel tank',
+                partNumbers: 'N/A',
+                notes: 'Equipped with electronic gauge and low level alarm. Includes filters: Sea water, Diesel, Decanter.',
+                image: ''
+            },
+            {
+                id: 'sys_007',
+                category: 'Fluids',
+                name: 'Freshwater Tank (Aft)',
+                location: 'Port aft cabin',
+                specifications: 'Capacity: 130 L / 34 US Gal\nMaterial: Roto moulded',
+                partNumbers: 'N/A',
+                notes: 'Features a stainless steel water deck filler and tank selection with ¼ by-pass valves. Total freshwater capacity is 346 L (91 US Gal).',
+                image: ''
+            },
+            {
+                id: 'sys_008',
+                category: 'Fluids',
+                name: 'Freshwater Tank (Forward)',
+                location: 'Forward cabin',
+                specifications: 'Capacity: 206 L / 54 US Gal\nMaterial: Roto moulded',
+                partNumbers: 'N/A',
+                notes: 'Features a stainless steel water deck filler and tank selection with ¼ by-pass valves.',
+                image: ''
+            },
+            {
+                id: 'sys_009',
+                category: 'Fluids',
+                name: 'Hot Water Heater',
+                location: 'Interior',
+                specifications: 'Type: Electric (engine run)\nCapacity: 25 L / 7 US Gal',
+                partNumbers: 'N/A',
+                notes: 'Part of the plumbing system that includes a pressurised electric water pump and accumulator tank.',
+                image: ''
+            },
+            {
+                id: 'sys_010',
+                category: 'Fluids',
+                name: 'Holding Tank (Rigid)',
+                location: 'Starboard Aft Head Compartment',
+                specifications: 'Capacity: 80 L / 21 US Gal',
+                partNumbers: 'N/A',
+                notes: 'Used in conjunction with the manual marine toilet.',
+                image: ''
+            },
+            {
+                id: 'sys_011',
+                category: 'Fluids',
+                name: 'Engine Coolant (Freshwater)',
+                location: 'Engine/Cooling system',
+                specifications: 'Engine Capacity (3YM30): 4.9 L (5.2 qt)\nCoolant Recovery Tank Capacity (Full): 0.8 L (0.8 qt)\nCoolant Type: Long Life Coolant (LLC)',
+                partNumbers: 'N/A',
+                notes: 'LLC replacement recommended every year, or every two years if a specific long-life type is used.',
+                image: ''
+            },
+            {
+                id: 'sys_012',
+                category: 'Fluids',
+                name: 'Manual Bilge Pump',
+                location: 'Cockpit',
+                specifications: 'Capacity: 40.5 liter / minute',
+                partNumbers: 'N/A',
+                notes: 'Control arm must be kept accessible at all times. Designed for spray/small leaks, not major hull breaches.',
+                image: ''
+            },
+            {
+                id: 'sys_013',
+                category: 'Fluids',
+                name: 'Electric Bilge Pump (Standard)',
+                location: 'Under the galley seating (on water pump unit)',
+                specifications: 'Operation: 12V service circuit\nControl: Electrical panel (OFF/Automatic/Mechanically operated)\nCapacity: 15 liter / minute',
+                partNumbers: 'N/A',
+                notes: 'Runs only when 12V circuit is activated by battery switches. Auto mode uses a trip switch in the sump area.',
+                image: ''
+            },
+            {
+                id: 'sys_014',
+                category: 'Fluids',
+                name: 'Electric Bilge Pump (Optional/Yanmar)',
+                location: 'Bilge',
+                specifications: 'Rating: 12V\nWeight: 1.4 kg\nDischarge at lift (0m): 20 liters/min or greater',
+                partNumbers: 'PUMP (12V).BILGE: 977780-01200 (Q\'TY: 1)\nSTRAINER: X179100011X (Q\'TY: 1)\nIMPELLER: 977780-03000 (Q\'TY: 1)',
+                notes: 'Should be positioned 50-70 cm from the bottom of the boat. Installation height recommended at 1m or greater above the bilge water.',
+                image: ''
+            },
+            {
+                id: 'sys_015',
+                category: 'Electrical',
+                name: 'Service Battery',
+                location: 'Port aft cabin',
+                specifications: 'Capacity: 110 Amperes',
+                partNumbers: 'N/A',
+                notes: 'One battery is standard; an optional 110 Ah service battery may be added. Part of the 12V circuit.',
+                image: ''
+            },
+            {
+                id: 'sys_016',
+                category: 'Electrical',
+                name: 'Engine Battery',
+                location: 'Port aft cabin',
+                specifications: 'Capacity: 70 Amperes',
+                partNumbers: 'N/A',
+                notes: 'Used for starting the engine.',
+                image: ''
+            },
+            {
+                id: 'sys_017',
+                category: 'Electrical',
+                name: 'Shore Power System',
+                location: 'Interior',
+                specifications: 'Voltage: 220V\nBattery Charger: 25 Amperes',
+                partNumbers: 'N/A',
+                notes: 'Complete system is an optional feature and includes inside sockets and a shore power socket.',
+                image: ''
+            },
+            {
+                id: 'sys_018',
+                category: 'Electrical',
+                name: 'Glow Plug',
+                location: 'Cylinder head',
+                specifications: 'Rated Current: 8-10A\nRated Voltage: DC11V',
+                partNumbers: 'N/A',
+                notes: 'Used for warming intake air when starting in cold areas.',
+                image: ''
+            },
+            {
+                id: 'sys_019',
+                category: 'Electrical',
+                name: 'Windlass Circuit Protection',
+                location: 'Under chart table seat',
+                specifications: 'Component 1: Circuit breaker (common negative and service positive)\nComponent 2: Protective safety switch for the electrical windlass circuit',
+                partNumbers: 'N/A',
+                notes: 'Electric windlass is a 1000 W optional item.',
+                image: ''
+            },
+            {
+                id: 'sys_020',
+                category: 'Rigging',
+                name: 'Standing Rigging',
+                location: 'Mast/Deck',
+                specifications: 'Type: Discontinuous stainless steel\nIncludes: 1 Forestay, 2 Backstays (with turnbuckles), 2 V2, 2 V1, 2 D1, 2 D2, 2 D3',
+                partNumbers: 'N/A',
+                notes: 'Mast is standard 9/10 electro-polished aluminum.',
+                image: ''
+            },
+            {
+                id: 'sys_021',
+                category: 'Rigging',
+                name: 'Mainsail',
+                location: 'Mast/Boom',
+                specifications: 'Type (Standard): Semi full batten written sail with slider and roller slider\nArea: 34.80 m² / 375 sq ft (Classic)',
+                partNumbers: 'N/A',
+                notes: 'Lazy Jack and Lazy Bag are standard in Natural colour.',
+                image: ''
+            },
+            {
+                id: 'sys_022',
+                category: 'Rigging',
+                name: 'Genoa',
+                location: 'Forestay/Deck',
+                specifications: 'Type (Standard): Furling genoa with UV protective strip\nArea (105%): 33.00 m² / 355 sq ft',
+                partNumbers: 'N/A',
+                notes: 'Genoa sheet size: D12 L13m.',
+                image: ''
+            },
+            {
+                id: 'sys_023',
+                category: 'Rigging',
+                name: 'Asymmetric Spinnaker',
+                location: 'N/A',
+                specifications: 'Area: 85.00 m² / 915 sq ft',
+                partNumbers: 'N/A',
+                notes: 'Optional equipment. Halyard size: Spi D10 L35m. Sheet size: Spinnaker sheet D12 L20m.',
+                image: ''
+            },
+            {
+                id: 'sys_024',
+                category: 'Rigging',
+                name: 'Genoa Sheet Winches',
+                location: 'Cockpit',
+                specifications: 'Type: Self-tailing\nQuantity: 2',
+                partNumbers: 'H46.2 STC',
+                notes: 'Standard equipment; 2 aluminium winch handles and 2 winch handle boxes are supplied.',
+                image: ''
+            },
+            {
+                id: 'sys_025',
+                category: 'Rigging',
+                name: 'Rigging Winch',
+                location: 'Deck house port side',
+                specifications: 'Type: Self tailing\nQuantity: 1',
+                partNumbers: 'H35.2 STC',
+                notes: 'Used for running rigging (e.g., halyards, reefing lines) run back to the cockpit.',
+                image: ''
+            },
+            {
+                id: 'sys_026',
+                category: 'Rigging',
+                name: 'Winch Handles',
+                location: 'N/A',
+                specifications: 'Quantity: 2 Aluminium handles\nStorage: 2 Winch handle boxes',
+                partNumbers: 'N/A',
+                notes: 'Winches must be professionally maintained and refitted to avoid accidents.',
+                image: ''
+            },
+            {
+                id: 'sys_027',
+                category: 'Safety',
+                name: 'Steering System',
+                location: 'Cockpit/Below deck',
+                specifications: 'Mechanism: Metal cable transmission system\nWheel: Leather covered, 1100 mm / 3\'7\'\' diameter',
+                partNumbers: 'N/A',
+                notes: 'Steering system should be checked annually. Steering cables must be changed every 10 years. Access to cables via trapdoor on transom extension.',
+                image: ''
+            },
+            {
+                id: 'sys_028',
+                category: 'Safety',
+                name: 'Emergency Tiller',
+                location: 'Cockpit',
+                specifications: '1 Tiller. Access via deck hole.',
+                partNumbers: 'N/A',
+                notes: 'Designed for continuing underway at reduced speed in case of steering gear failure.',
+                image: ''
+            },
+            {
+                id: 'sys_029',
+                category: 'Safety',
+                name: 'Fire Extinguishers',
+                location: 'Interior (Recommended locations)',
+                specifications: 'Minimum Capacity: 15 A/102 B (3 extinguishers at least for the Oceanis 37)',
+                partNumbers: 'N/A',
+                notes: 'Recommended positions: Forward cabin wardrobe (1), Near chart table (2), Port aft cabin hanger cupboard (3), Engine compartment aperture (4).',
+                image: ''
+            },
+            {
+                id: 'sys_030',
+                category: 'Safety',
+                name: 'Gas System',
+                location: 'Wet locker to port (in cockpit)',
+                specifications: 'Storage Capacity: 2 gas bottles\nGas Type: Butane, 10 kg/cm² service pressure\nMain Components: Pressure reducing valve and safety tap; Tap under sink',
+                partNumbers: 'N/A',
+                notes: 'Gas locker features a drain. Cylinder valves must be closed when appliances are not in use.',
+                image: ''
+            },
+            {
+                id: 'sys_031',
+                category: 'Safety',
+                name: 'Liferaft Storage',
+                location: 'Wet locker to port (cockpit)',
+                specifications: 'Storage locker',
+                partNumbers: 'N/A',
+                notes: 'The locker should never be padlocked or locked when sailing.',
+                image: ''
+            },
+            {
+                id: 'sys_032',
+                category: 'Hull',
+                name: 'Hull/Keel (Standard)',
+                location: 'Below Waterline',
+                specifications: 'Hull Type: Fin w/spade rudder\nKeel Draft (Deep): 1.90 m / 6\'3\'\' (or 4.58 ft / 1.40 m in different source)\nBallast Weight (Deep): 1,770 kg / 3,901 lbs\nConstruction: Monolithic hull design in polyester; cast iron keel',
+                partNumbers: 'N/A',
+                notes: 'Light displacement is 6,515 kg (14,359 lbs). Max Draft may also be reported as 4.58 ft / 1.40 m.',
+                image: ''
+            },
+            {
+                id: 'sys_033',
+                category: 'Hull',
+                name: 'Lifting Points',
+                location: 'Hull',
+                specifications: 'N/A',
+                partNumbers: 'N/A',
+                notes: 'Lifting points are detailed in Chapter 3 of the owner\'s manual (see diagram for lifting location).',
+                image: ''
+            }
+        ];
+
+        // Initialize app
+        function init() {
+            // Load data from localStorage or use initial data
+            const savedData = localStorage.getItem('boatSystems');
+            if (savedData) {
+                systems = JSON.parse(savedData);
+            } else {
+                systems = initialData;
+                saveToLocalStorage();
+            }
+
+            renderSystems();
+            updateStats();
+        }
+
+        // Save to localStorage
+        function saveToLocalStorage() {
+            localStorage.setItem('boatSystems', JSON.stringify(systems));
+            localStorage.setItem('lastUpdated', new Date().toISOString());
+            updateStats();
+        }
+
+        // Update stats dashboard
+        function updateStats() {
+            document.getElementById('totalSystems').textContent = systems.length;
+
+            const categories = new Set(systems.map(s => s.category));
+            document.getElementById('categoriesCount').textContent = categories.size;
+
+            const lastUpdate = localStorage.getItem('lastUpdated');
+            if (lastUpdate) {
+                const date = new Date(lastUpdate);
+                document.getElementById('lastUpdated').textContent = date.toLocaleDateString();
+            }
+        }
+
+        // Render systems
+        function renderSystems() {
+            const grid = document.getElementById('systemsGrid');
+            const emptyState = document.getElementById('emptyState');
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const categoryFilter = document.getElementById('categoryFilter').value;
+
+            // Filter systems
+            let filtered = systems.filter(system => {
+                const matchesSearch = !searchTerm ||
+                    system.name.toLowerCase().includes(searchTerm) ||
+                    system.location.toLowerCase().includes(searchTerm) ||
+                    system.specifications.toLowerCase().includes(searchTerm) ||
+                    system.partNumbers.toLowerCase().includes(searchTerm) ||
+                    system.notes.toLowerCase().includes(searchTerm);
+
+                const matchesCategory = categoryFilter === 'all' || system.category === categoryFilter;
+
+                return matchesSearch && matchesCategory;
+            });
+
+            // Show empty state if no results
+            if (filtered.length === 0) {
+                grid.innerHTML = '';
+                emptyState.classList.remove('hidden');
+                return;
+            }
+
+            emptyState.classList.add('hidden');
+
+            // Render cards
+            grid.innerHTML = filtered.map(system => `
+                <div class="system-card" onclick="viewDetails('${system.id}')">
+                    <div class="card-header">
+                        <h3>${system.name}</h3>
+                        <span class="category-badge">${system.category}</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="card-field">
+                            <label>Location</label>
+                            <p>${system.location}</p>
+                        </div>
+                        ${system.specifications ? `
+                        <div class="card-field">
+                            <label>Specifications</label>
+                            <p>${truncate(system.specifications, 150)}</p>
+                        </div>
+                        ` : ''}
+                        ${system.image ? `
+                            <img src="${system.image}" alt="${system.name}" class="card-image">
+                        ` : ''}
+                    </div>
+                    <div class="card-actions">
+                        <button class="btn btn-small btn-secondary" onclick="event.stopPropagation(); editSystem('${system.id}')">Edit</button>
+                        <button class="btn btn-small btn-danger" onclick="event.stopPropagation(); deleteSystem('${system.id}')">Delete</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Truncate text
+        function truncate(text, length) {
+            if (text.length <= length) return text;
+            return text.substring(0, length) + '...';
+        }
+
+        // Filter by category
+        function filterByCategory(category) {
+            // Update tabs
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            event.target.classList.add('active');
+
+            // Update select
+            document.getElementById('categoryFilter').value = category;
+
+            renderSystems();
+        }
+
+        // Search
+        document.getElementById('searchInput').addEventListener('input', renderSystems);
+        document.getElementById('categoryFilter').addEventListener('change', renderSystems);
+
+        // View details
+        function viewDetails(id) {
+            const system = systems.find(s => s.id === id);
+            if (!system) return;
+
+            document.getElementById('detailsTitle').textContent = system.name;
+            document.getElementById('detailsContent').innerHTML = `
+                <div class="card-field">
+                    <label>Category</label>
+                    <p>${system.category}</p>
+                </div>
+                <div class="card-field">
+                    <label>Location</label>
+                    <p>${system.location}</p>
+                </div>
+                ${system.specifications ? `
+                <div class="card-field">
+                    <label>Specifications</label>
+                    <p style="white-space: pre-line;">${system.specifications}</p>
+                </div>
+                ` : ''}
+                ${system.partNumbers ? `
+                <div class="card-field">
+                    <label>Part Numbers</label>
+                    <p style="white-space: pre-line;">${system.partNumbers}</p>
+                </div>
+                ` : ''}
+                ${system.notes ? `
+                <div class="card-field">
+                    <label>Important Notes</label>
+                    <p style="white-space: pre-line;">${system.notes}</p>
+                </div>
+                ` : ''}
+                ${system.image ? `
+                <div class="card-field">
+                    <label>Image</label>
+                    <img src="${system.image}" alt="${system.name}" style="max-width: 100%; border-radius: 4px;">
+                </div>
+                ` : ''}
+            `;
+
+            document.getElementById('detailsModal').classList.add('active');
+        }
+
+        function closeDetailsModal() {
+            document.getElementById('detailsModal').classList.remove('active');
+        }
+
+        // Open add modal
+        function openAddModal() {
+            currentEditId = null;
+            document.getElementById('modalTitle').textContent = 'Add New System';
+            document.getElementById('systemForm').reset();
+            document.getElementById('systemId').value = '';
+            document.getElementById('imagePreview').classList.remove('active');
+            document.getElementById('systemModal').classList.add('active');
+        }
+
+        // Edit system
+        function editSystem(id) {
+            const system = systems.find(s => s.id === id);
+            if (!system) return;
+
+            currentEditId = id;
+            document.getElementById('modalTitle').textContent = 'Edit System';
+            document.getElementById('systemId').value = system.id;
+            document.getElementById('category').value = system.category;
+            document.getElementById('name').value = system.name;
+            document.getElementById('location').value = system.location;
+            document.getElementById('specifications').value = system.specifications;
+            document.getElementById('partNumbers').value = system.partNumbers;
+            document.getElementById('notes').value = system.notes;
+
+            if (system.image) {
+                document.getElementById('imagePreview').src = system.image;
+                document.getElementById('imagePreview').classList.add('active');
+            } else {
+                document.getElementById('imagePreview').classList.remove('active');
+            }
+
+            document.getElementById('systemModal').classList.add('active');
+        }
+
+        // Save system
+        function saveSystem() {
+            const form = document.getElementById('systemForm');
+            if (!form.checkValidity()) {
+                form.reportValidity();
+                return;
+            }
+
+            const systemData = {
+                id: document.getElementById('systemId').value || 'sys_' + Date.now(),
+                category: document.getElementById('category').value,
+                name: document.getElementById('name').value,
+                location: document.getElementById('location').value,
+                specifications: document.getElementById('specifications').value,
+                partNumbers: document.getElementById('partNumbers').value,
+                notes: document.getElementById('notes').value,
+                image: document.getElementById('imagePreview').src || ''
+            };
+
+            if (currentEditId) {
+                // Edit existing
+                const index = systems.findIndex(s => s.id === currentEditId);
+                if (index !== -1) {
+                    systems[index] = systemData;
+                }
+            } else {
+                // Add new
+                systems.push(systemData);
+            }
+
+            saveToLocalStorage();
+            renderSystems();
+            closeModal();
+        }
+
+        // Delete system
+        function deleteSystem(id) {
+            if (!confirm('Are you sure you want to delete this system? This cannot be undone.')) {
+                return;
+            }
+
+            systems = systems.filter(s => s.id !== id);
+            saveToLocalStorage();
+            renderSystems();
+        }
+
+        // Close modal
+        function closeModal() {
+            document.getElementById('systemModal').classList.remove('active');
+            currentEditId = null;
+        }
+
+        // Preview image
+        function previewImage(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            // Check file size (limit to 1MB for localStorage)
+            if (file.size > 1024 * 1024) {
+                alert('Image is too large. Please choose an image smaller than 1MB.');
+                event.target.value = '';
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const preview = document.getElementById('imagePreview');
+                preview.src = e.target.result;
+                preview.classList.add('active');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // Export data
+        function exportData() {
+            const dataStr = JSON.stringify(systems, null, 2);
+            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(dataBlob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'beneteau-oceanis-37-systems-' + new Date().toISOString().split('T')[0] + '.json';
+            link.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // Import data
+        function importData() {
+            document.getElementById('importFile').click();
+        }
+
+        function handleImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const imported = JSON.parse(e.target.result);
+                    if (!Array.isArray(imported)) {
+                        alert('Invalid file format. Expected an array of systems.');
+                        return;
+                    }
+
+                    if (confirm('This will replace all current data. Are you sure?')) {
+                        systems = imported;
+                        saveToLocalStorage();
+                        renderSystems();
+                        alert('Data imported successfully!');
+                    }
+                } catch (error) {
+                    alert('Error parsing JSON file: ' + error.message);
+                }
+            };
+            reader.readAsText(file);
+            event.target.value = ''; // Reset input
+        }
+
+        // Close modals on background click
+        document.getElementById('systemModal').addEventListener('click', function(e) {
+            if (e.target === this) closeModal();
+        });
+
+        document.getElementById('detailsModal').addEventListener('click', function(e) {
+            if (e.target === this) closeDetailsModal();
+        });
+
+        // Initialize on load
+        init();
+    </script>
+</body>
+</html>
