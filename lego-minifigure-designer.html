@@ -8,6 +8,7 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <style>
         * {
             margin: 0;
@@ -208,9 +209,56 @@
         ::-webkit-scrollbar-thumb:hover {
             background: #c40009;
         }
+
+        #loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 24px;
+            z-index: 9999;
+        }
+
+        #loading .spinner {
+            border: 4px solid rgba(255,255,255,0.3);
+            border-top: 4px solid white;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error-message {
+            background: #ff4444;
+            color: white;
+            padding: 20px;
+            margin: 20px;
+            border-radius: 8px;
+            max-width: 600px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
     </style>
 </head>
 <body>
+    <div id="loading">
+        <div class="spinner"></div>
+        <div>Loading LEGO Minifigure Designer...</div>
+        <div style="font-size: 14px; margin-top: 10px; opacity: 0.8;">Please ensure JavaScript is enabled</div>
+    </div>
     <div id="root"></div>
 
     <script type="text/babel">
@@ -282,20 +330,46 @@
             top.position.y = 0.5;
             group.add(top);
 
-            // Connection stud on top
+            // Connection stud on top (decorative)
             const studGeometry = new THREE.CylinderGeometry(0.15, 0.15, 0.08, 16);
             const studMaterial = new THREE.MeshStandardMaterial({ color });
             const stud = new THREE.Mesh(studGeometry, studMaterial);
             stud.position.y = 0.54;
             group.add(stud);
 
+            // BOTTOM CONNECTION: Hollow receptacle (anti-stud) to receive torso stud
+            // This is the cavity that the torso stud will fit into
+            const receptacleOuter = new THREE.CylinderGeometry(0.24, 0.24, 0.15, 16);
+            const receptacleInner = new THREE.CylinderGeometry(0.18, 0.18, 0.16, 16);
+
+            // Create ring/tube shape using CSG (simplified as ring)
+            const receptacleGeometry = new THREE.CylinderGeometry(0.24, 0.24, 0.15, 16);
+            const receptacle = new THREE.Mesh(receptacleGeometry, headMaterial);
+            receptacle.position.y = -0.075;
+            group.add(receptacle);
+
+            // Inner tube guide
+            const innerTubeGeometry = new THREE.CylinderGeometry(0.17, 0.17, 0.12, 16);
+            const innerTubeMaterial = new THREE.MeshStandardMaterial({
+                color: color,
+                transparent: true,
+                opacity: 0.9
+            });
+            const innerTube = new THREE.Mesh(innerTubeGeometry, innerTubeMaterial);
+            innerTube.position.y = -0.06;
+            group.add(innerTube);
+
             return group;
         };
 
         const createTorso = (color) => {
+            const group = new THREE.Group();
+
+            // Main torso body
             const geometry = new THREE.BoxGeometry(0.8, 0.9, 0.5);
             const material = new THREE.MeshStandardMaterial({ color });
             const torso = new THREE.Mesh(geometry, material);
+            group.add(torso);
 
             // Add arm connection points (small cylinders on sides)
             const armConnectGeom = new THREE.CylinderGeometry(0.08, 0.08, 0.1, 8);
@@ -311,7 +385,31 @@
             rightArmConnect.position.set(0.45, 0.25, 0);
             torso.add(rightArmConnect);
 
-            return torso;
+            // TOP CONNECTION: Stud that goes into head
+            const topStudGeometry = new THREE.CylinderGeometry(0.16, 0.16, 0.2, 16);
+            const topStud = new THREE.Mesh(topStudGeometry, material);
+            topStud.position.y = 0.55; // Extends above torso top
+            group.add(topStud);
+
+            // BOTTOM CONNECTION: Receptacles for leg studs
+            // Left receptacle
+            const receptacleGeometry = new THREE.CylinderGeometry(0.13, 0.13, 0.18, 16);
+            const leftReceptacle = new THREE.Mesh(receptacleGeometry, material);
+            leftReceptacle.position.set(-0.2, -0.54, 0);
+            group.add(leftReceptacle);
+
+            // Right receptacle
+            const rightReceptacle = new THREE.Mesh(receptacleGeometry, material);
+            rightReceptacle.position.set(0.2, -0.54, 0);
+            group.add(rightReceptacle);
+
+            // Visual connection plate on bottom
+            const bottomPlateGeometry = new THREE.BoxGeometry(0.7, 0.08, 0.45);
+            const bottomPlate = new THREE.Mesh(bottomPlateGeometry, material);
+            bottomPlate.position.y = -0.49;
+            group.add(bottomPlate);
+
+            return group;
         };
 
         const createLegs = (color) => {
@@ -329,6 +427,24 @@
             const rightLeg = new THREE.Mesh(legGeometry, legMaterial);
             rightLeg.position.set(0.2, -0.45, 0);
             group.add(rightLeg);
+
+            // TOP CONNECTION: Studs that go into torso receptacles
+            // Left leg stud
+            const studGeometry = new THREE.CylinderGeometry(0.12, 0.12, 0.25, 16);
+            const leftStud = new THREE.Mesh(studGeometry, legMaterial);
+            leftStud.position.set(-0.2, 0.125, 0);
+            group.add(leftStud);
+
+            // Right leg stud
+            const rightStud = new THREE.Mesh(studGeometry, legMaterial);
+            rightStud.position.set(0.2, 0.125, 0);
+            group.add(rightStud);
+
+            // Connection plate (top of legs assembly)
+            const topPlateGeometry = new THREE.BoxGeometry(0.75, 0.1, 0.5);
+            const topPlate = new THREE.Mesh(topPlateGeometry, legMaterial);
+            topPlate.position.y = 0.05;
+            group.add(topPlate);
 
             return group;
         };
@@ -1502,9 +1618,80 @@
             );
         }
 
-        // Render the app
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<LegoMinifigureDesigner />);
+        // Error handling wrapper
+        window.addEventListener('error', function(e) {
+            console.error('Application Error:', e.error);
+            const loading = document.getElementById('loading');
+            if (loading) {
+                loading.innerHTML = `
+                    <div class="error-message">
+                        <h2 style="margin-bottom: 10px;">⚠️ Error Loading Application</h2>
+                        <p><strong>Error:</strong> ${e.message}</p>
+                        <p style="margin-top: 15px;"><strong>Troubleshooting:</strong></p>
+                        <ul style="margin-left: 20px; margin-top: 10px;">
+                            <li>Make sure you have an active internet connection</li>
+                            <li>Try refreshing the page (Ctrl+F5 or Cmd+Shift+R)</li>
+                            <li>Check browser console (F12) for detailed errors</li>
+                            <li>Try a different browser (Chrome, Firefox, or Edge)</li>
+                            <li>Disable browser extensions that might block scripts</li>
+                        </ul>
+                        <button onclick="location.reload()" style="margin-top: 20px; padding: 10px 20px; background: white; color: #ff4444; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">
+                            Reload Page
+                        </button>
+                    </div>
+                `;
+            }
+        });
+
+        // Check if libraries loaded
+        if (typeof React === 'undefined' || typeof ReactDOM === 'undefined' || typeof THREE === 'undefined') {
+            document.getElementById('loading').innerHTML = `
+                <div class="error-message">
+                    <h2 style="margin-bottom: 10px;">⚠️ Libraries Failed to Load</h2>
+                    <p>Required JavaScript libraries could not be loaded from CDN.</p>
+                    <p style="margin-top: 15px;"><strong>Possible causes:</strong></p>
+                    <ul style="margin-left: 20px; margin-top: 10px;">
+                        <li>No internet connection</li>
+                        <li>CDN servers are down</li>
+                        <li>Firewall or ad-blocker blocking external scripts</li>
+                    </ul>
+                    <p style="margin-top: 15px;"><strong>Try:</strong> Opening this file with an active internet connection</p>
+                    <button onclick="location.reload()" style="margin-top: 20px; padding: 10px 20px; background: white; color: #ff4444; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">
+                        Retry
+                    </button>
+                </div>
+            `;
+        } else {
+            // Render the app
+            try {
+                const root = ReactDOM.createRoot(document.getElementById('root'));
+                root.render(<LegoMinifigureDesigner />);
+
+                // Hide loading screen after a short delay
+                setTimeout(() => {
+                    const loading = document.getElementById('loading');
+                    if (loading) {
+                        loading.style.opacity = '0';
+                        loading.style.transition = 'opacity 0.5s';
+                        setTimeout(() => {
+                            loading.style.display = 'none';
+                        }, 500);
+                    }
+                }, 1000);
+            } catch (err) {
+                console.error('Render error:', err);
+                document.getElementById('loading').innerHTML = `
+                    <div class="error-message">
+                        <h2 style="margin-bottom: 10px;">⚠️ Rendering Error</h2>
+                        <p><strong>Error:</strong> ${err.message}</p>
+                        <p style="margin-top: 10px;">Please check the browser console (F12) for details.</p>
+                        <button onclick="location.reload()" style="margin-top: 20px; padding: 10px 20px; background: white; color: #ff4444; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">
+                            Reload Page
+                        </button>
+                    </div>
+                `;
+            }
+        }
     </script>
 </body>
 </html>
