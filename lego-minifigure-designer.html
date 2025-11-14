@@ -330,20 +330,46 @@
             top.position.y = 0.5;
             group.add(top);
 
-            // Connection stud on top
+            // Connection stud on top (decorative)
             const studGeometry = new THREE.CylinderGeometry(0.15, 0.15, 0.08, 16);
             const studMaterial = new THREE.MeshStandardMaterial({ color });
             const stud = new THREE.Mesh(studGeometry, studMaterial);
             stud.position.y = 0.54;
             group.add(stud);
 
+            // BOTTOM CONNECTION: Hollow receptacle (anti-stud) to receive torso stud
+            // This is the cavity that the torso stud will fit into
+            const receptacleOuter = new THREE.CylinderGeometry(0.24, 0.24, 0.15, 16);
+            const receptacleInner = new THREE.CylinderGeometry(0.18, 0.18, 0.16, 16);
+
+            // Create ring/tube shape using CSG (simplified as ring)
+            const receptacleGeometry = new THREE.CylinderGeometry(0.24, 0.24, 0.15, 16);
+            const receptacle = new THREE.Mesh(receptacleGeometry, headMaterial);
+            receptacle.position.y = -0.075;
+            group.add(receptacle);
+
+            // Inner tube guide
+            const innerTubeGeometry = new THREE.CylinderGeometry(0.17, 0.17, 0.12, 16);
+            const innerTubeMaterial = new THREE.MeshStandardMaterial({
+                color: color,
+                transparent: true,
+                opacity: 0.9
+            });
+            const innerTube = new THREE.Mesh(innerTubeGeometry, innerTubeMaterial);
+            innerTube.position.y = -0.06;
+            group.add(innerTube);
+
             return group;
         };
 
         const createTorso = (color) => {
+            const group = new THREE.Group();
+
+            // Main torso body
             const geometry = new THREE.BoxGeometry(0.8, 0.9, 0.5);
             const material = new THREE.MeshStandardMaterial({ color });
             const torso = new THREE.Mesh(geometry, material);
+            group.add(torso);
 
             // Add arm connection points (small cylinders on sides)
             const armConnectGeom = new THREE.CylinderGeometry(0.08, 0.08, 0.1, 8);
@@ -359,7 +385,31 @@
             rightArmConnect.position.set(0.45, 0.25, 0);
             torso.add(rightArmConnect);
 
-            return torso;
+            // TOP CONNECTION: Stud that goes into head
+            const topStudGeometry = new THREE.CylinderGeometry(0.16, 0.16, 0.2, 16);
+            const topStud = new THREE.Mesh(topStudGeometry, material);
+            topStud.position.y = 0.55; // Extends above torso top
+            group.add(topStud);
+
+            // BOTTOM CONNECTION: Receptacles for leg studs
+            // Left receptacle
+            const receptacleGeometry = new THREE.CylinderGeometry(0.13, 0.13, 0.18, 16);
+            const leftReceptacle = new THREE.Mesh(receptacleGeometry, material);
+            leftReceptacle.position.set(-0.2, -0.54, 0);
+            group.add(leftReceptacle);
+
+            // Right receptacle
+            const rightReceptacle = new THREE.Mesh(receptacleGeometry, material);
+            rightReceptacle.position.set(0.2, -0.54, 0);
+            group.add(rightReceptacle);
+
+            // Visual connection plate on bottom
+            const bottomPlateGeometry = new THREE.BoxGeometry(0.7, 0.08, 0.45);
+            const bottomPlate = new THREE.Mesh(bottomPlateGeometry, material);
+            bottomPlate.position.y = -0.49;
+            group.add(bottomPlate);
+
+            return group;
         };
 
         const createLegs = (color) => {
@@ -377,6 +427,24 @@
             const rightLeg = new THREE.Mesh(legGeometry, legMaterial);
             rightLeg.position.set(0.2, -0.45, 0);
             group.add(rightLeg);
+
+            // TOP CONNECTION: Studs that go into torso receptacles
+            // Left leg stud
+            const studGeometry = new THREE.CylinderGeometry(0.12, 0.12, 0.25, 16);
+            const leftStud = new THREE.Mesh(studGeometry, legMaterial);
+            leftStud.position.set(-0.2, 0.125, 0);
+            group.add(leftStud);
+
+            // Right leg stud
+            const rightStud = new THREE.Mesh(studGeometry, legMaterial);
+            rightStud.position.set(0.2, 0.125, 0);
+            group.add(rightStud);
+
+            // Connection plate (top of legs assembly)
+            const topPlateGeometry = new THREE.BoxGeometry(0.75, 0.1, 0.5);
+            const topPlate = new THREE.Mesh(topPlateGeometry, legMaterial);
+            topPlate.position.y = 0.05;
+            group.add(topPlate);
 
             return group;
         };
