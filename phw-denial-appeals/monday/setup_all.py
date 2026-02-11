@@ -15,13 +15,11 @@ import sys
 import time
 
 from monday_client import (
-    change_column_metadata,
     create_board,
     create_column,
     create_group,
     delete_board,
     delete_group,
-    execute_query,
     get_board_columns,
     get_board_groups,
 )
@@ -65,7 +63,23 @@ COLUMNS = [
     },
     {"title": "Denial Date", "type": "date"},
     {"title": "Filing Deadline", "type": "date"},
-    {"title": "Appeal Status", "type": "status"},
+    {
+        "title": "Appeal Status",
+        "type": "status",
+        "defaults": {
+            "labels": {
+                "0": "New",
+                "1": "Drafted",
+                "2": "Under Review",
+                "3": "Submitted",
+                "4": "Awaiting Decision",
+                "5": "Won",
+                "6": "Lost",
+                "7": "Escalated",
+            },
+            "done_colors": [5],
+        },
+    },
     {"title": "Appeal Letter", "type": "link"},
     {
         "title": "Provider",
@@ -155,20 +169,12 @@ def main():
             status_column_id = col_id
         time.sleep(0.5)  # Rate limiting
 
-    # Step 4: Configure Appeal Status labels
-    print("\n[4/6] Configuring Appeal Status labels...")
+    # Step 4: Status labels are set via defaults during column creation (above)
+    print("\n[4/6] Appeal Status labels...")
     if status_column_id:
-        result = change_column_metadata(
-            board_id, status_column_id, "labels", json.dumps(STATUS_LABELS["labels"]), api_token=token
-        )
-        if result.get("data", {}).get("change_column_metadata"):
-            print(f"  Status labels configured on column {status_column_id}")
-        else:
-            print(f"  Warning: Status label config may have issues")
-            print(f"  Response: {json.dumps(result, indent=2)}")
+        print(f"  Status labels set via defaults on column {status_column_id}")
     else:
-        print("  ERROR: Could not find Appeal Status column ID!")
-
+        print("  WARNING: Could not find Appeal Status column ID")
     time.sleep(1)
 
     # Step 5: Create groups
