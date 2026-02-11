@@ -1,0 +1,292 @@
+{
+  "name": "PHW — Denial Intake",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "phw-denial-intake",
+        "options": {
+          "responseMode": "lastNode"
+        }
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook — Denial Intake",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "phw-denial-intake"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse incoming denial data from DrChrono ERA/835 webhook or manual entry\nconst input = $input.first().json;\n\n// Determine input format\nlet inputData;\nlet source;\n\nif (input.era_835) {\n  // ERA/835 electronic remittance from DrChrono\n  inputData = input.era_835;\n  source = 'drchrono_era';\n} else if (input.manual_entry) {\n  // Manual entry from billing staff\n  inputData = input.manual_entry;\n  source = 'manual';\n} else {\n  // Raw body — treat as unstructured text\n  inputData = JSON.stringify(input);\n  source = 'raw';\n}\n\n// If structured data has required fields, skip Gemini classification\nlet needsClassification = true;\nlet parsedData = {};\n\nif (input.denial_code && input.patient_name && input.dos && input.denied_amount) {\n  needsClassification = false;\n  parsedData = {\n    denial_code: input.denial_code,\n    denial_label: {\n      'PTOT08A': 'MTB Reached',\n      'PTOT05': 'Non-Skilled',\n      'PTOT21': 'Re-eval Bundled',\n      'PTOT19': 'Dup Eval'\n    }[input.denial_code] || 'Unknown',\n    patient_name: input.patient_name,\n    member_id: input.member_id || '',\n    dos: input.dos,\n    denied_amount: parseFloat(input.denied_amount) || 0,\n    denial_date: input.denial_date || new Date().toISOString().split('T')[0],\n    plan_type: input.plan_type || 'Unknown',\n    claim_number: input.claim_number || '',\n    provider: input.provider || '',\n    location: input.location || '',\n    cpt_codes: input.cpt_codes || [],\n    npi: input.npi || ''\n  };\n}\n\nreturn [{\n  json: {\n    source,\n    needs_classification: needsClassification,\n    raw_input: inputData,\n    parsed_data: parsedData\n  }\n}];"
+      },
+      "id": "parse-input",
+      "name": "Parse Input Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "needs-classification",
+              "leftValue": "={{ $json.needs_classification }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-classification",
+      "name": "Needs AI Classification?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://us-east1-aiplatform.googleapis.com/v1/projects/{{ $env.GCP_PROJECT_ID }}/locations/us-east1/publishers/google/models/gemini-2.5-pro:generateContent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'SYSTEM PROMPT — PHW Denial Classification Agent\\n\\nYou are a medical billing denial classification specialist for Prestige Health & Wellness (PHW), an out-of-network physical and occupational therapy practice in Manhattan, NY. PHW treats patients insured by Optum/UnitedHealthcare.\\n\\nYOUR TASK: Analyze the incoming denial information and classify it into one of the 4 known denial codes. Extract all structured data needed for the Monday.com pipeline and appeal generation.\\n\\nKNOWN DENIAL CODES:\\n1. PTOT08A — Maximum Therapy Benefit (MTB) Reached\\n2. PTOT05 — Non-Skilled Services\\n3. PTOT21 — Re-Evaluation Bundled\\n4. PTOT19 — Duplicate Evaluation\\n\\nRETURN STRICT JSON with: classification (denial_code, denial_label, confidence, reasoning), patient (name, dob, member_id), claim (claim_number, dos_start, dos_end, cpt_codes, denied_amount, denial_date), payer (name, plan_type), provider (name, npi), filing_deadline, urgency, missing_fields.\\n\\n---\\nUSER INPUT:\\n' + $json.raw_input }] }], generationConfig: { maxOutputTokens: 4096, temperature: 0.1 } }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "gemini-classify",
+      "name": "Gemini — Classify Denial",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [910, 200],
+      "credentials": {
+        "googleApi": {
+          "id": "CONFIGURE_ME",
+          "name": "Google Cloud — Vertex AI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Gemini classification response\nconst response = $input.first().json;\nlet text = '';\n\nif (response.candidates && response.candidates[0]) {\n  const parts = response.candidates[0].content?.parts || [];\n  text = parts.map(p => p.text || '').join('');\n}\n\n// Strip markdown code fences\ntext = text.trim();\nif (text.startsWith('```')) text = text.split('\\n').slice(1).join('\\n');\nif (text.endsWith('```')) text = text.slice(0, text.lastIndexOf('```'));\ntext = text.trim();\nif (text.startsWith('json')) text = text.slice(4).trim();\n\nlet classification;\ntry {\n  classification = JSON.parse(text);\n} catch (e) {\n  throw new Error(`Failed to parse Gemini response as JSON: ${e.message}. Raw: ${text.slice(0, 200)}`);\n}\n\nconst c = classification.classification || {};\nconst patient = classification.patient || {};\nconst claim = classification.claim || {};\nconst payer = classification.payer || {};\nconst provider = classification.provider || {};\n\n// Calculate filing deadline: denial_date + 365 days\nconst denialDate = claim.denial_date || new Date().toISOString().split('T')[0];\nconst deadline = new Date(denialDate);\ndeadline.setDate(deadline.getDate() + 365);\n\nreturn [{\n  json: {\n    denial_code: c.denial_code || 'UNKNOWN',\n    denial_label: c.denial_label || 'Unknown',\n    confidence: c.confidence || 0,\n    reasoning: c.reasoning || '',\n    patient_name: patient.name || 'Unknown Patient',\n    member_id: patient.member_id || '',\n    dos: claim.dos_start || '',\n    denied_amount: parseFloat(claim.denied_amount) || 0,\n    denial_date: denialDate,\n    filing_deadline: deadline.toISOString().split('T')[0],\n    plan_type: payer.plan_type || 'Unknown',\n    claim_number: claim.claim_number || '',\n    provider: provider.name || '',\n    npi: provider.npi || '',\n    cpt_codes: claim.cpt_codes || [],\n    location: '',\n    missing_fields: classification.missing_fields || [],\n    urgency: classification.urgency || 'standard',\n    source: 'gemini_classified'\n  }\n}];"
+      },
+      "id": "parse-classification",
+      "name": "Parse Classification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1130, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pass through pre-parsed structured data (no AI needed)\nconst data = $input.first().json.parsed_data;\n\n// Calculate filing deadline if not present\nif (!data.filing_deadline) {\n  const denialDate = data.denial_date || new Date().toISOString().split('T')[0];\n  const deadline = new Date(denialDate);\n  deadline.setDate(deadline.getDate() + 365);\n  data.filing_deadline = deadline.toISOString().split('T')[0];\n}\n\n// Determine urgency\nconst today = new Date();\nconst deadlineDate = new Date(data.filing_deadline);\nconst daysRemaining = Math.ceil((deadlineDate - today) / (1000 * 60 * 60 * 24));\ndata.urgency = daysRemaining < 30 ? 'urgent' : 'standard';\ndata.source = 'structured_input';\n\nreturn [{ json: data }];"
+      },
+      "id": "pass-structured",
+      "name": "Use Structured Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 420]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge both paths into a single normalized item for Monday.com\nconst data = $input.first().json;\n\n// Build Monday.com column values JSON\nconst columnValues = {\n  // Denial Code (dropdown)\n  dropdown_mm0ffjcd: {\n    labels: [`${data.denial_code} - ${data.denial_label}`]\n  },\n  // DOS (date)\n  date_mm0fp9n1: {\n    date: data.dos || ''\n  },\n  // Amount (numbers)\n  numeric_mm0fh3jn: String(data.denied_amount || 0),\n  // Plan Type (dropdown)\n  dropdown_mm0fjy49: {\n    labels: [data.plan_type || 'Unknown']\n  },\n  // Denial Date\n  date_mm0frn70: {\n    date: data.denial_date || ''\n  },\n  // Filing Deadline\n  date_mm0fgzne: {\n    date: data.filing_deadline || ''\n  },\n  // Appeal Status (status) — set to New\n  color_mm0fj7fm: {\n    label: 'New'\n  },\n  // Provider (dropdown)\n  dropdown_mm0fdaya: data.provider ? { labels: [data.provider] } : {},\n  // Location (dropdown)\n  dropdown_mm0fac7b: data.location ? { labels: [data.location] } : {}\n};\n\nreturn [{\n  json: {\n    item_name: `${data.patient_name} — ${data.denial_code}`,\n    column_values: JSON.stringify(columnValues),\n    group_id: 'group_mm0fc0ne',  // New Denials\n    ...data\n  }\n}];"
+      },
+      "id": "build-monday-item",
+      "name": "Build Monday.com Item",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1350, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.monday.com/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "API-Version",
+              "value": "2024-10"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: 'mutation ($boardId: ID!, $itemName: String!, $groupId: String!, $colValues: JSON!) { create_item(board_id: $boardId, item_name: $itemName, group_id: $groupId, column_values: $colValues) { id name } }', variables: { boardId: '18399605169', itemName: $json.item_name, groupId: $json.group_id, colValues: $json.column_values } }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "create-monday-item",
+      "name": "Monday.com — Create Item",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1570, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURE_ME",
+          "name": "Monday.com API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract Monday.com item ID and prepare alert message\nconst response = $input.first().json;\nconst item = response?.data?.create_item;\n\nif (!item || !item.id) {\n  throw new Error('Failed to create Monday.com item: ' + JSON.stringify(response));\n}\n\n// Get original data from earlier in the pipeline\nconst data = $('Build Monday.com Item').first().json;\n\nconst urgencyLabel = data.urgency === 'urgent' ? ' [URGENT]' : '';\nconst alertMessage = `New Denial Received${urgencyLabel}\\n` +\n  `Patient: ${data.patient_name}\\n` +\n  `Code: ${data.denial_code} — ${data.denial_label}\\n` +\n  `Amount: $${data.denied_amount}\\n` +\n  `DOS: ${data.dos}\\n` +\n  `Filing Deadline: ${data.filing_deadline}\\n` +\n  `Board: https://phw-team.monday.com/boards/18399605169`;\n\nreturn [{\n  json: {\n    monday_item_id: item.id,\n    monday_item_name: item.name,\n    alert_message: alertMessage,\n    ...data\n  }\n}];"
+      },
+      "id": "prepare-alert",
+      "name": "Prepare Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1790, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.RINGCENTRAL_WEBHOOK_DENIALS || 'https://hooks.ringcentral.com/webhook/CONFIGURE_ME' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ activity: 'PHW Denial Intake', title: 'New Denial: ' + $json.patient_name + ' — ' + $json.denial_code, body: $json.alert_message }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "ringcentral-alert",
+      "name": "RingCentral — New Denial Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2010, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Final response with success status\nconst data = $('Prepare Alert').first().json;\n\nreturn [{\n  json: {\n    status: 'success',\n    message: `Denial intake processed for ${data.patient_name}`,\n    monday_item_id: data.monday_item_id,\n    denial_code: data.denial_code,\n    filing_deadline: data.filing_deadline\n  }\n}];"
+      },
+      "id": "respond-success",
+      "name": "Respond — Success",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2230, 300]
+    }
+  ],
+  "connections": {
+    "Webhook — Denial Intake": {
+      "main": [
+        [{ "node": "Parse Input Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Input Data": {
+      "main": [
+        [{ "node": "Needs AI Classification?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Needs AI Classification?": {
+      "main": [
+        [{ "node": "Gemini — Classify Denial", "type": "main", "index": 0 }],
+        [{ "node": "Use Structured Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Gemini — Classify Denial": {
+      "main": [
+        [{ "node": "Parse Classification", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Classification": {
+      "main": [
+        [{ "node": "Build Monday.com Item", "type": "main", "index": 0 }]
+      ]
+    },
+    "Use Structured Data": {
+      "main": [
+        [{ "node": "Build Monday.com Item", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Monday.com Item": {
+      "main": [
+        [{ "node": "Monday.com — Create Item", "type": "main", "index": 0 }]
+      ]
+    },
+    "Monday.com — Create Item": {
+      "main": [
+        [{ "node": "Prepare Alert", "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare Alert": {
+      "main": [
+        [{ "node": "RingCentral — New Denial Alert", "type": "main", "index": 0 }]
+      ]
+    },
+    "RingCentral — New Denial Alert": {
+      "main": [
+        [{ "node": "Respond — Success", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    { "name": "PHW" },
+    { "name": "Denial Appeals" },
+    { "name": "Phase 2" }
+  ],
+  "pinData": {},
+  "meta": {
+    "instanceId": "phw-self-hosted",
+    "templateCredsSetupCompleted": false
+  },
+  "_readme": {
+    "description": "PHW Denial Intake — Workflow 1 of 3",
+    "overview": "Receives denial data from DrChrono webhook or manual entry, classifies it using Gemini AI (if unstructured), creates a Monday.com item in the New Denials group, and sends a RingCentral alert to the billing team.",
+    "setup_steps": [
+      "1. Import this workflow into your n8n instance",
+      "2. Configure Google Cloud credential (service account with Vertex AI access)",
+      "3. Configure Monday.com HTTP Header Auth credential (Authorization: <your-token>)",
+      "4. Set environment variable: GCP_PROJECT_ID = your GCP project ID",
+      "5. Set environment variable: RINGCENTRAL_WEBHOOK_DENIALS = your RingCentral webhook URL",
+      "6. Activate the workflow — the webhook URL will be displayed in the Webhook node"
+    ],
+    "board_id": "18399605169",
+    "column_ids": {
+      "denial_code": "dropdown_mm0ffjcd",
+      "dos": "date_mm0fp9n1",
+      "amount": "numeric_mm0fh3jn",
+      "plan_type": "dropdown_mm0fjy49",
+      "denial_date": "date_mm0frn70",
+      "filing_deadline": "date_mm0fgzne",
+      "appeal_status": "color_mm0fj7fm",
+      "appeal_letter": "link_mm0fsy2k",
+      "provider": "dropdown_mm0fdaya",
+      "location": "dropdown_mm0fac7b",
+      "outcome_amount": "numeric_mm0fvbv1"
+    },
+    "group_ids": {
+      "new_denials": "group_mm0fc0ne",
+      "in_progress": "group_mm0fhrnr",
+      "submitted": "group_mm0fn6ad",
+      "resolved": "group_mm0fmapq"
+    }
+  }
+}

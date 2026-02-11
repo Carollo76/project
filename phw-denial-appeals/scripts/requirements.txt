@@ -1,0 +1,11 @@
+# PHW Denial Appeals — Python Dependencies
+
+# Monday.com API client
+requests>=2.31.0
+
+# Vertex AI / Google Cloud authentication
+google-auth>=2.23.0
+google-auth-httplib2>=0.2.0
+
+# Date/time handling (stdlib, listed for clarity)
+# datetime — included in Python stdlib

@@ -1,0 +1,410 @@
+{
+  "name": "PHW — Alert & Escalation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "daily-cron",
+      "name": "Daily Deadline Check (7 AM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 200]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "phw-status-change",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook — Status Change",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 500],
+      "webhookId": "phw-status-change"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.monday.com/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "API-Version",
+              "value": "2024-10"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: '{ boards(ids: [18399605169]) { items_page(limit: 500) { items { id name group { id title } column_values { id title text value } } } } }' }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "fetch-all-items",
+      "name": "Monday.com — Fetch All Items",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURE_ME",
+          "name": "Monday.com API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check each item for approaching filing deadlines\nconst response = $input.first().json;\nconst items = response?.data?.boards?.[0]?.items_page?.items || [];\nconst today = new Date();\ntoday.setHours(0, 0, 0, 0);\n\nconst thresholds = [30, 14, 7];\nconst alerts = [];\n\nfor (const item of items) {\n  const columns = {};\n  for (const col of item.column_values || []) {\n    columns[col.id] = { text: col.text, value: col.value ? JSON.parse(col.value) : null };\n  }\n\n  const statusText = columns.color_mm0fj7fm?.text || '';\n  const filingDeadlineStr = columns.date_mm0fgzne?.text || '';\n  const patientName = item.name;\n  const denialCode = columns.dropdown_mm0ffjcd?.text || '';\n  const planType = columns.dropdown_mm0fjy49?.text || '';\n  const deniedAmount = columns.numeric_mm0fh3jn?.text || '0';\n\n  // Skip resolved items (Won, Lost)\n  if (['Won', 'Lost'].includes(statusText)) continue;\n\n  if (!filingDeadlineStr) continue;\n\n  const deadline = new Date(filingDeadlineStr);\n  deadline.setHours(0, 0, 0, 0);\n  const daysRemaining = Math.ceil((deadline - today) / (1000 * 60 * 60 * 24));\n\n  // Check if any threshold is hit\n  for (const threshold of thresholds) {\n    if (daysRemaining === threshold || (daysRemaining <= threshold && daysRemaining > 0)) {\n      // Only alert at exact thresholds or if deadline is critically close\n      if (daysRemaining === threshold || daysRemaining <= 7) {\n        const urgency = daysRemaining <= 7 ? 'CRITICAL' : daysRemaining <= 14 ? 'WARNING' : 'NOTICE';\n        alerts.push({\n          item_id: item.id,\n          patient_name: patientName,\n          denial_code: denialCode,\n          plan_type: planType,\n          denied_amount: deniedAmount,\n          appeal_status: statusText,\n          filing_deadline: filingDeadlineStr,\n          days_remaining: daysRemaining,\n          urgency,\n          group: item.group?.title || ''\n        });\n        break;  // One alert per item\n      }\n    }\n  }\n}\n\n// Sort by urgency (most urgent first)\nalerts.sort((a, b) => a.days_remaining - b.days_remaining);\n\nreturn alerts.length > 0\n  ? alerts.map(a => ({ json: a }))\n  : [{ json: { no_alerts: true, items_checked: items.length } }];"
+      },
+      "id": "check-deadlines",
+      "name": "Check Filing Deadlines",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-alerts",
+              "leftValue": "={{ $json.no_alerts }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "has-deadline-alerts",
+      "name": "Any Deadline Alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [940, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build deadline alert message for RingCentral\nconst items = $input.all().map(i => i.json);\n\nlet message = 'FILING DEADLINE ALERTS\\n' + '='.repeat(40) + '\\n\\n';\n\nfor (const item of items) {\n  const emoji = item.urgency === 'CRITICAL' ? '[CRITICAL]' :\n                item.urgency === 'WARNING' ? '[WARNING]' : '[NOTICE]';\n\n  message += `${emoji} ${item.patient_name}\\n`;\n  message += `  Code: ${item.denial_code}\\n`;\n  message += `  Amount: $${item.denied_amount}\\n`;\n  message += `  Status: ${item.appeal_status}\\n`;\n  message += `  Deadline: ${item.filing_deadline} (${item.days_remaining} days)\\n`;\n  if (item.days_remaining <= 7) {\n    message += `  ACTION REQUIRED: File immediately or escalate!\\n`;\n  }\n  message += '\\n';\n}\n\nmessage += `Board: https://phw-team.monday.com/boards/18399605169\\n`;\nmessage += `Total alerts: ${items.length}`;\n\nreturn [{\n  json: {\n    alert_message: message,\n    alert_count: items.length,\n    critical_count: items.filter(i => i.urgency === 'CRITICAL').length\n  }\n}];"
+      },
+      "id": "build-deadline-alert",
+      "name": "Build Deadline Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1160, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.RINGCENTRAL_WEBHOOK_DENIALS || 'https://hooks.ringcentral.com/webhook/CONFIGURE_ME' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ activity: 'PHW Deadline Alerts', title: 'Filing Deadline Alerts (' + $json.alert_count + ' items, ' + $json.critical_count + ' critical)', body: $json.alert_message }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "send-deadline-alert",
+      "name": "RingCentral — Deadline Alerts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1380, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Monday.com status change webhook for escalation\nconst input = $input.first().json;\nconst event = input.event || input;\n\nconst itemId = String(event.pulseId || event.itemId || input.itemId || '');\nconst statusLabel = event.value?.label?.text || event.value?.name || input.status || '';\n\nreturn [{\n  json: {\n    item_id: itemId,\n    new_status: statusLabel,\n    is_escalation: statusLabel === 'Escalated',\n    is_won: statusLabel === 'Won',\n    is_lost: statusLabel === 'Lost'\n  }\n}];"
+      },
+      "id": "parse-status-change",
+      "name": "Parse Status Change",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "is-escalation",
+              "leftValue": "={{ $json.is_escalation }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-escalation",
+      "name": "Status = Escalated?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [720, 500]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.monday.com/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "API-Version",
+              "value": "2024-10"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: 'query ($itemIds: [ID!]!) { items(ids: $itemIds) { id name column_values { id title text value } } }', variables: { itemIds: [$json.item_id] } }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "fetch-escalation-item",
+      "name": "Monday.com — Fetch Item for Escalation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [940, 400],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURE_ME",
+          "name": "Monday.com API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build escalation routing message based on plan type\nconst response = $input.first().json;\nconst item = response?.data?.items?.[0];\n\nif (!item) {\n  throw new Error('Item not found for escalation');\n}\n\nconst columns = {};\nfor (const col of item.column_values || []) {\n  columns[col.id] = { text: col.text, value: col.value ? JSON.parse(col.value) : null };\n}\n\nconst patientName = item.name;\nconst planType = columns.dropdown_mm0fjy49?.text || 'Unknown';\nconst denialCode = columns.dropdown_mm0ffjcd?.text || '';\nconst deniedAmount = columns.numeric_mm0fh3jn?.text || '0';\nconst filingDeadline = columns.date_mm0fgzne?.text || '';\nconst denialDate = columns.date_mm0frn70?.text || '';\n\n// Calculate days remaining for external appeal\nconst today = new Date();\nconst deadline120 = new Date(denialDate);\ndeadline120.setDate(deadline120.getDate() + 120);  // External appeal deadline\nconst daysToExternal = Math.ceil((deadline120 - today) / (1000 * 60 * 60 * 24));\n\nlet escalationMessage;\nlet escalationPath;\n\nif (planType === 'Fully Insured') {\n  escalationPath = 'NY DFS External Appeal';\n  escalationMessage = `ESCALATION — FULLY INSURED PLAN\\n` +\n    `${'='.repeat(40)}\\n\\n` +\n    `Patient: ${patientName}\\n` +\n    `Denial Code: ${denialCode}\\n` +\n    `Amount: $${deniedAmount}\\n\\n` +\n    `ROUTE: NY Department of Financial Services External Appeal\\n` +\n    `TYPE: Independent External Review (binding, 30-day review)\\n` +\n    `DEADLINE: ${daysToExternal} days remaining (120 days from denial)\\n` +\n    `FEE: $25 (waivable for financial hardship)\\n\\n` +\n    `FILING STEPS:\\n` +\n    `1. Verify 2 levels of internal appeal exhausted\\n` +\n    `2. Gather: final denial letter, clinical records, provider letter of necessity, AOB, patient auth\\n` +\n    `3. File at: https://myportal.dfs.ny.gov/web/guest-applications/external-appeals\\n` +\n    `4. Pay $25 filing fee (or request hardship waiver)\\n\\n` +\n    `CITATIONS:\\n` +\n    `- NY Insurance Law §4914\\n` +\n    `- 11 NYCRR 410\\n` +\n    `- NY Public Health Law §4900-4910\\n\\n` +\n    `Board: https://phw-team.monday.com/boards/18399605169`;\n} else {\n  escalationPath = 'Federal ERISA External Review';\n  escalationMessage = `ESCALATION — SELF-FUNDED / ERISA PLAN\\n` +\n    `${'='.repeat(40)}\\n\\n` +\n    `Patient: ${patientName}\\n` +\n    `Denial Code: ${denialCode}\\n` +\n    `Amount: $${deniedAmount}\\n\\n` +\n    `ROUTE: Federal External Review (CMS/DOL)\\n` +\n    `TYPE: Independent Review Organization (IRO) — binding on plan\\n` +\n    `DEADLINE: ${daysToExternal} days remaining (120 days from final internal denial)\\n\\n` +\n    `FILING STEPS:\\n` +\n    `1. Verify 2 levels of internal appeal exhausted (or plan failed to comply with claims procedure)\\n` +\n    `2. Request Summary Plan Description (SPD) showing external review rights\\n` +\n    `3. Gather: final adverse determination, clinical records, provider letter, IRO authorization forms\\n` +\n    `4. Submit to plan's designated accredited IRO\\n\\n` +\n    `CITATIONS:\\n` +\n    `- 29 CFR §2590.715-2719\\n` +\n    `- ACA §2719\\n` +\n    `- 29 USC §1133\\n` +\n    `- DOL Technical Release 2010-01\\n\\n` +\n    `NOTE: State external appeal (NY DFS) does NOT apply to self-funded ERISA plans.\\n\\n` +\n    `Board: https://phw-team.monday.com/boards/18399605169`;\n}\n\nreturn [{\n  json: {\n    item_id: item.id,\n    patient_name: patientName,\n    plan_type: planType,\n    escalation_path: escalationPath,\n    escalation_message: escalationMessage,\n    days_to_external_deadline: daysToExternal\n  }\n}];"
+      },
+      "id": "build-escalation",
+      "name": "Build Escalation Routing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1160, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.RINGCENTRAL_WEBHOOK_DENIALS || 'https://hooks.ringcentral.com/webhook/CONFIGURE_ME' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ activity: 'PHW Escalation', title: 'ESCALATION: ' + $json.patient_name + ' → ' + $json.escalation_path, body: $json.escalation_message }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "send-escalation-alert",
+      "name": "RingCentral — Escalation Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1380, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle Won/Lost status changes — move to Resolved group\nconst data = $('Parse Status Change').first().json;\n\nif (!data.is_won && !data.is_lost) {\n  return [{ json: { status: 'skipped', reason: 'Not a resolution status' } }];\n}\n\nreturn [{\n  json: {\n    item_id: data.item_id,\n    new_status: data.new_status,\n    move_to_group: 'group_mm0fmapq'  // Resolved\n  }\n}];"
+      },
+      "id": "check-resolution",
+      "name": "Check Won/Lost Resolution",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [940, 620]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-group-move",
+              "leftValue": "={{ $json.move_to_group }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "needs-group-move",
+      "name": "Needs Group Move?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1160, 620]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.monday.com/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "API-Version",
+              "value": "2024-10"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: 'mutation ($itemId: ID!, $groupId: String!) { move_item_to_group(item_id: $itemId, group_id: $groupId) { id } }', variables: { itemId: $json.item_id, groupId: $json.move_to_group } }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "move-to-resolved",
+      "name": "Monday.com — Move to Resolved",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1380, 620],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURE_ME",
+          "name": "Monday.com API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// No deadline alerts today\nreturn [{ json: { status: 'ok', message: 'No filing deadlines approaching' } }];"
+      },
+      "id": "no-alerts",
+      "name": "No Alerts Today",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1160, 260]
+    }
+  ],
+  "connections": {
+    "Daily Deadline Check (7 AM)": {
+      "main": [
+        [{ "node": "Monday.com — Fetch All Items", "type": "main", "index": 0 }]
+      ]
+    },
+    "Monday.com — Fetch All Items": {
+      "main": [
+        [{ "node": "Check Filing Deadlines", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Filing Deadlines": {
+      "main": [
+        [{ "node": "Any Deadline Alerts?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Any Deadline Alerts?": {
+      "main": [
+        [{ "node": "Build Deadline Alert", "type": "main", "index": 0 }],
+        [{ "node": "No Alerts Today", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Deadline Alert": {
+      "main": [
+        [{ "node": "RingCentral — Deadline Alerts", "type": "main", "index": 0 }]
+      ]
+    },
+    "Webhook — Status Change": {
+      "main": [
+        [{ "node": "Parse Status Change", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Status Change": {
+      "main": [
+        [{ "node": "Status = Escalated?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Status = Escalated?": {
+      "main": [
+        [{ "node": "Monday.com — Fetch Item for Escalation", "type": "main", "index": 0 }],
+        [{ "node": "Check Won/Lost Resolution", "type": "main", "index": 0 }]
+      ]
+    },
+    "Monday.com — Fetch Item for Escalation": {
+      "main": [
+        [{ "node": "Build Escalation Routing", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Escalation Routing": {
+      "main": [
+        [{ "node": "RingCentral — Escalation Alert", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Won/Lost Resolution": {
+      "main": [
+        [{ "node": "Needs Group Move?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Needs Group Move?": {
+      "main": [
+        [{ "node": "Monday.com — Move to Resolved", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    { "name": "PHW" },
+    { "name": "Denial Appeals" },
+    { "name": "Phase 2" }
+  ],
+  "pinData": {},
+  "meta": {
+    "instanceId": "phw-self-hosted",
+    "templateCredsSetupCompleted": false
+  },
+  "_readme": {
+    "description": "PHW Alert & Escalation — Workflow 3 of 3",
+    "overview": "Two triggers: (1) Daily 7 AM cron checks all open items for approaching filing deadlines (30/14/7 days) and sends RingCentral alerts. (2) Monday.com webhook on status change handles escalation routing (Fully Insured → NY DFS, ERISA → Federal review) and auto-moves Won/Lost items to Resolved group.",
+    "setup_steps": [
+      "1. Import this workflow into your n8n instance",
+      "2. Configure Monday.com HTTP Header Auth credential",
+      "3. Set env var: RINGCENTRAL_WEBHOOK_DENIALS = your RingCentral webhook URL",
+      "4. In Monday.com board settings, create a webhook that fires on Appeal Status changes and points to this workflow's Status Change webhook URL",
+      "5. Activate the workflow — cron will run daily at 7 AM"
+    ],
+    "board_id": "18399605169",
+    "escalation_paths": {
+      "fully_insured": "NY DFS External Appeal — 120 days, $25 fee, binding 30-day review",
+      "self_funded_erisa": "Federal External Review via IRO — 120 days, binding on plan"
+    }
+  }
+}

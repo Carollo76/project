@@ -1,0 +1,395 @@
+{
+  "name": "PHW — Appeal Generation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "phw-appeal-trigger",
+        "options": {
+          "responseMode": "lastNode"
+        }
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook — Monday.com Status Change",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "phw-appeal-trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Monday.com webhook payload\n// Monday sends: { event: { boardId, pulseId, columnId, value, ... } }\nconst input = $input.first().json;\nconst event = input.event || input;\n\nconst itemId = String(event.pulseId || event.itemId || input.itemId || '');\nconst boardId = String(event.boardId || '18399605169');\nconst statusValue = event.value?.label?.text || event.value?.name || '';\n\nif (!itemId) {\n  throw new Error('No item ID found in webhook payload');\n}\n\n// Only proceed if status is \"New\" (trigger appeal generation)\nconst shouldProcess = statusValue === 'New' || !statusValue;\n\nreturn [{\n  json: {\n    item_id: itemId,\n    board_id: boardId,\n    status_value: statusValue,\n    should_process: shouldProcess\n  }\n}];"
+      },
+      "id": "parse-webhook",
+      "name": "Parse Webhook Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "should-process",
+              "leftValue": "={{ $json.should_process }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-status",
+      "name": "Status = New?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.monday.com/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "API-Version",
+              "value": "2024-10"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: 'query ($itemIds: [ID!]!) { items(ids: $itemIds) { id name column_values { id title text value } } }', variables: { itemIds: [$json.item_id] } }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "fetch-monday-item",
+      "name": "Monday.com — Fetch Item Details",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [910, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURE_ME",
+          "name": "Monday.com API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract item data from Monday.com response\nconst response = $input.first().json;\nconst item = response?.data?.items?.[0];\n\nif (!item) {\n  throw new Error('Item not found in Monday.com response');\n}\n\n// Parse column values into a usable object\nconst columns = {};\nfor (const col of item.column_values || []) {\n  columns[col.id] = {\n    title: col.title,\n    text: col.text,\n    value: col.value ? JSON.parse(col.value) : null\n  };\n}\n\n// Extract key fields\nconst denialCodeRaw = columns.dropdown_mm0ffjcd?.text || '';\nconst denialCode = denialCodeRaw.split(' - ')[0]?.trim() || denialCodeRaw;\nconst denialLabel = denialCodeRaw.split(' - ')[1]?.trim() || '';\nconst planType = columns.dropdown_mm0fjy49?.text || 'Unknown';\nconst patientName = item.name.split(' — ')[0]?.trim() || item.name;\n\nreturn [{\n  json: {\n    item_id: item.id,\n    item_name: item.name,\n    patient_name: patientName,\n    denial_code: denialCode,\n    denial_label: denialLabel,\n    dos: columns.date_mm0fp9n1?.text || '',\n    denied_amount: columns.numeric_mm0fh3jn?.text || '0',\n    plan_type: planType,\n    denial_date: columns.date_mm0frn70?.text || '',\n    filing_deadline: columns.date_mm0fgzne?.text || '',\n    provider: columns.dropdown_mm0fdaya?.text || '',\n    location: columns.dropdown_mm0fac7b?.text || '',\n    is_fully_insured: planType === 'Fully Insured'\n  }\n}];"
+      },
+      "id": "extract-item-data",
+      "name": "Extract Item Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1130, 200]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.DRCHRONO_API_URL || 'https://app.drchrono.com/api' }}/clinical_notes",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "patient_name",
+              "value": "={{ $json.patient_name }}"
+            },
+            {
+              "name": "date",
+              "value": "={{ $json.dos }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "fetch-clinical-docs",
+      "name": "DrChrono — Fetch Clinical Docs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1350, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURE_ME",
+          "name": "DrChrono API"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the Gemini appeal drafting prompt\n// Combine: classification data + clinical docs + appropriate template\nconst itemData = $('Extract Item Data').first().json;\nconst clinicalDocs = $('DrChrono — Fetch Clinical Docs').first().json;\n\n// Select the correct template based on denial code\nconst templateMap = {\n  'PTOT08A': 'appeal_PTOT08A',\n  'PTOT05': 'appeal_PTOT05',\n  'PTOT21': 'appeal_PTOT21',\n  'PTOT19': 'appeal_PTOT19'\n};\nconst templateName = templateMap[itemData.denial_code] || 'appeal_PTOT08A';\n\n// Build classification data JSON for the prompt\nconst classificationData = {\n  classification: {\n    denial_code: itemData.denial_code,\n    denial_label: itemData.denial_label\n  },\n  patient: {\n    name: itemData.patient_name\n  },\n  claim: {\n    dos_start: itemData.dos,\n    denied_amount: itemData.denied_amount,\n    denial_date: itemData.denial_date\n  },\n  payer: {\n    name: 'Optum / UnitedHealthcare',\n    plan_type: itemData.plan_type\n  },\n  provider: {\n    name: itemData.provider\n  },\n  filing_deadline: itemData.filing_deadline\n};\n\n// Build clinical docs summary\nlet clinicalSummary = 'Clinical documentation from DrChrono:\\n';\nif (clinicalDocs && !clinicalDocs.error) {\n  clinicalSummary += JSON.stringify(clinicalDocs, null, 2);\n} else {\n  clinicalSummary += '(Clinical documentation not available — DrChrono API not yet connected. Use placeholder data and list all gaps in missing_documentation.)';\n}\n\n// Build the full prompt\nconst prompt = `SYSTEM PROMPT — PHW Appeal Letter Drafting Agent\n\nYou are a medical billing appeal letter specialist for Prestige Health & Wellness (PHW), an out-of-network PT/OT practice in Manhattan, NY. You draft persuasive, evidence-based appeal letters for Optum/UHC denials.\n\nYOUR TASK: Generate a complete, ready-to-send appeal letter using the appropriate template, denial classification data, and clinical documentation from DrChrono.\n\nCONTEXT:\n- PHW is an OUT-OF-NETWORK provider — every letter must include AOB reference and OON language\n- All letters must include dual escalation path (NY DFS for fully insured, Federal/ERISA for self-funded)\n- Letters must cite specific CMS Medicare Benefit Policy Manual sections\n- Tone: Professional, firm, evidence-based.\n\nDENIAL CODE: ${itemData.denial_code} — ${itemData.denial_label}\nPLAN TYPE: ${itemData.plan_type}\n\nOUTPUT FORMAT: Return a JSON object with: appeal_letter (complete Markdown), summary (2-3 sentences), key_arguments (3-5 bullets), evidence_strength, evidence_assessment, missing_documentation, recommended_actions.\n\nRULES:\n- Fill in ALL template variables\n- Never fabricate clinical data\n- Include specific dates, scores, and measurements from clinical records\n- Always include the escalation notice appropriate to the plan type\n\n---\nCLASSIFICATION DATA:\n${JSON.stringify(classificationData, null, 2)}\n\nCLINICAL DOCUMENTATION:\n${clinicalSummary}\n\nTEMPLATE NAME: ${templateName}.md\n`;\n\nreturn [{\n  json: {\n    prompt,\n    item_id: itemData.item_id,\n    patient_name: itemData.patient_name,\n    denial_code: itemData.denial_code,\n    template_name: templateName\n  }\n}];"
+      },
+      "id": "build-prompt",
+      "name": "Build Appeal Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1570, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://us-east1-aiplatform.googleapis.com/v1/projects/{{ $env.GCP_PROJECT_ID }}/locations/us-east1/publishers/google/models/gemini-2.5-pro:generateContent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: $json.prompt }] }], generationConfig: { maxOutputTokens: 8192, temperature: 0.3 } }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "gemini-draft",
+      "name": "Gemini — Draft Appeal Letter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1790, 200],
+      "credentials": {
+        "googleApi": {
+          "id": "CONFIGURE_ME",
+          "name": "Google Cloud — Vertex AI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Gemini appeal drafting response\nconst response = $input.first().json;\nconst prevData = $('Build Appeal Prompt').first().json;\n\nlet text = '';\nif (response.candidates && response.candidates[0]) {\n  const parts = response.candidates[0].content?.parts || [];\n  text = parts.map(p => p.text || '').join('');\n}\n\n// Strip markdown code fences\ntext = text.trim();\nif (text.startsWith('```')) text = text.split('\\n').slice(1).join('\\n');\nif (text.endsWith('```')) text = text.slice(0, text.lastIndexOf('```'));\ntext = text.trim();\nif (text.startsWith('json')) text = text.slice(4).trim();\n\nlet appeal;\ntry {\n  appeal = JSON.parse(text);\n} catch (e) {\n  // If JSON parsing fails, treat the whole response as the appeal letter\n  appeal = {\n    appeal_letter: text,\n    summary: `Appeal drafted for ${prevData.patient_name} — ${prevData.denial_code}`,\n    key_arguments: [],\n    evidence_strength: 'unknown',\n    evidence_assessment: 'Could not parse structured response',\n    missing_documentation: [],\n    recommended_actions: ['Review AI-generated letter manually']\n  };\n}\n\nreturn [{\n  json: {\n    ...prevData,\n    appeal_letter: appeal.appeal_letter || '',\n    summary: appeal.summary || '',\n    key_arguments: appeal.key_arguments || [],\n    evidence_strength: appeal.evidence_strength || 'unknown',\n    missing_documentation: appeal.missing_documentation || [],\n    recommended_actions: appeal.recommended_actions || []\n  }\n}];"
+      },
+      "id": "parse-appeal",
+      "name": "Parse Appeal Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2010, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://docs.googleapis.com/v1/documents",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ title: 'Appeal — ' + $json.patient_name + ' — ' + $json.denial_code + ' — ' + new Date().toISOString().split('T')[0] }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "create-google-doc",
+      "name": "Google Drive — Create Doc",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2230, 200],
+      "credentials": {
+        "googleApi": {
+          "id": "CONFIGURE_ME",
+          "name": "Google Cloud — Drive/Docs"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the update to insert appeal text into the Google Doc\n// and prepare the Monday.com update\nconst prevData = $('Parse Appeal Response').first().json;\nconst docResponse = $input.first().json;\n\nlet docUrl = '';\nlet docId = '';\n\nif (docResponse.documentId) {\n  docId = docResponse.documentId;\n  docUrl = `https://docs.google.com/document/d/${docId}/edit`;\n}\n\n// Build Monday.com column update\nconst columnValues = {\n  // Appeal Status → Drafted\n  color_mm0fj7fm: { label: 'Drafted' },\n  // Appeal Letter (link)\n  link_mm0fsy2k: docUrl ? { url: docUrl, text: 'Appeal Letter' } : {}\n};\n\nreturn [{\n  json: {\n    ...prevData,\n    doc_id: docId,\n    doc_url: docUrl,\n    column_values: JSON.stringify(columnValues),\n    move_to_group: 'group_mm0fhrnr'  // In Progress\n  }\n}];"
+      },
+      "id": "prepare-updates",
+      "name": "Prepare Monday.com Updates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2450, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.monday.com/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "API-Version",
+              "value": "2024-10"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: 'mutation ($itemId: ID!, $boardId: ID!, $colValues: JSON!, $groupId: String!) { change_multiple_column_values(item_id: $itemId, board_id: $boardId, column_values: $colValues) { id } move_item_to_group(item_id: $itemId, group_id: $groupId) { id } }', variables: { itemId: $json.item_id, boardId: '18399605169', colValues: $json.column_values, groupId: $json.move_to_group } }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "update-monday-item",
+      "name": "Monday.com — Update Status & Link",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2670, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURE_ME",
+          "name": "Monday.com API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.RINGCENTRAL_WEBHOOK_DENIALS || 'https://hooks.ringcentral.com/webhook/CONFIGURE_ME' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ activity: 'PHW Appeal Generated', title: 'Appeal Drafted: ' + $json.patient_name + ' — ' + $json.denial_code, body: 'Appeal letter drafted and ready for review.\\n\\nPatient: ' + $json.patient_name + '\\nDenial Code: ' + $json.denial_code + '\\nEvidence Strength: ' + $json.evidence_strength + '\\n\\nDoc: ' + ($json.doc_url || 'N/A') + '\\nBoard: https://phw-team.monday.com/boards/18399605169\\n\\nPlease review the appeal letter before submission.' }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "ringcentral-alert",
+      "name": "RingCentral — Appeal Ready Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2890, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Final response\nconst data = $('Prepare Monday.com Updates').first().json;\n\nreturn [{\n  json: {\n    status: 'success',\n    message: `Appeal drafted for ${data.patient_name} — ${data.denial_code}`,\n    item_id: data.item_id,\n    doc_url: data.doc_url || 'Google Docs not configured',\n    evidence_strength: data.evidence_strength,\n    recommended_actions: data.recommended_actions\n  }\n}];"
+      },
+      "id": "respond-success",
+      "name": "Respond — Success",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3110, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// No-op: status is not 'New', skip processing\nreturn [{ json: { status: 'skipped', reason: 'Status is not New' } }];"
+      },
+      "id": "skip-processing",
+      "name": "Skip — Not New Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 420]
+    }
+  ],
+  "connections": {
+    "Webhook — Monday.com Status Change": {
+      "main": [
+        [{ "node": "Parse Webhook Payload", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Webhook Payload": {
+      "main": [
+        [{ "node": "Status = New?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Status = New?": {
+      "main": [
+        [{ "node": "Monday.com — Fetch Item Details", "type": "main", "index": 0 }],
+        [{ "node": "Skip — Not New Status", "type": "main", "index": 0 }]
+      ]
+    },
+    "Monday.com — Fetch Item Details": {
+      "main": [
+        [{ "node": "Extract Item Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract Item Data": {
+      "main": [
+        [{ "node": "DrChrono — Fetch Clinical Docs", "type": "main", "index": 0 }]
+      ]
+    },
+    "DrChrono — Fetch Clinical Docs": {
+      "main": [
+        [{ "node": "Build Appeal Prompt", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Appeal Prompt": {
+      "main": [
+        [{ "node": "Gemini — Draft Appeal Letter", "type": "main", "index": 0 }]
+      ]
+    },
+    "Gemini — Draft Appeal Letter": {
+      "main": [
+        [{ "node": "Parse Appeal Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Appeal Response": {
+      "main": [
+        [{ "node": "Google Drive — Create Doc", "type": "main", "index": 0 }]
+      ]
+    },
+    "Google Drive — Create Doc": {
+      "main": [
+        [{ "node": "Prepare Monday.com Updates", "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare Monday.com Updates": {
+      "main": [
+        [{ "node": "Monday.com — Update Status & Link", "type": "main", "index": 0 }]
+      ]
+    },
+    "Monday.com — Update Status & Link": {
+      "main": [
+        [{ "node": "RingCentral — Appeal Ready Alert", "type": "main", "index": 0 }]
+      ]
+    },
+    "RingCentral — Appeal Ready Alert": {
+      "main": [
+        [{ "node": "Respond — Success", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    { "name": "PHW" },
+    { "name": "Denial Appeals" },
+    { "name": "Phase 2" }
+  ],
+  "pinData": {},
+  "meta": {
+    "instanceId": "phw-self-hosted",
+    "templateCredsSetupCompleted": false
+  },
+  "_readme": {
+    "description": "PHW Appeal Generation — Workflow 2 of 3",
+    "overview": "Triggered by Monday.com status change to 'New'. Fetches item details, pulls clinical docs from DrChrono, sends to Gemini for appeal letter drafting, creates Google Doc, updates Monday.com (status → Drafted, link to doc, move to In Progress group), and sends RingCentral alert.",
+    "setup_steps": [
+      "1. Import this workflow into your n8n instance",
+      "2. Configure Google Cloud credential (Vertex AI + Docs/Drive access)",
+      "3. Configure Monday.com HTTP Header Auth credential",
+      "4. Configure DrChrono HTTP Header Auth credential (when available)",
+      "5. Set env vars: GCP_PROJECT_ID, RINGCENTRAL_WEBHOOK_DENIALS",
+      "6. In Monday.com board settings, create a webhook integration that sends to this workflow's URL when Appeal Status changes",
+      "7. Activate the workflow"
+    ],
+    "board_id": "18399605169"
+  }
+}
