@@ -11,9 +11,11 @@
 {{payer_address}}
 
 **From:**
-Prestige Health & Wellness
+{{entity_name}}
+{{entity_address}}
+Phone: {{entity_phone}} | Fax: {{entity_fax}}
+NPI: {{entity_npi}} | Tax ID: {{entity_tax_id}}
 {{provider_name}}, {{provider_credentials}}
-{{provider_npi}}
 
 **Patient:** {{patient_name}}
 **Date of Birth:** {{patient_dob}}
@@ -28,11 +30,11 @@ Prestige Health & Wellness
 
 ## Assignment of Benefits
 
-An Assignment of Benefits (AOB) is on file for {{patient_name}}, authorizing Prestige Health & Wellness to bill, collect, and appeal on the patient's behalf. A copy of the signed AOB is enclosed.
+An Assignment of Benefits (AOB) is on file for {{patient_name}}, authorizing {{entity_name}} to bill, collect, and appeal on the patient's behalf. A copy of the signed AOB is enclosed.
 
 ## Out-of-Network Provider Statement
 
-Prestige Health & Wellness is an out-of-network provider. The patient selected our practice for specialized {{specialty_type}} services based on clinical expertise. Per applicable law, medical necessity determinations must be based on clinical evidence, not provider network status.
+{{entity_name}} is an out-of-network provider. The patient selected our practice for specialized {{specialty_type}} services based on clinical expertise. Per applicable law, medical necessity determinations must be based on clinical evidence, not provider network status.
 
 ---
 
@@ -125,8 +127,9 @@ We respectfully request that {{payer_name}}:
 **Respectfully submitted,**
 
 {{provider_name}}, {{provider_credentials}}
-NPI: {{provider_npi}}
-Prestige Health & Wellness
-{{practice_phone}}
+{{entity_name}}
+{{entity_address}}
+Phone: {{entity_phone}} | Fax: {{entity_fax}}
+NPI: {{entity_npi}} | Tax ID: {{entity_tax_id}}
 
 *This appeal was prepared on {{appeal_date}} and must be reviewed within the timeframe required by applicable law and plan documents.*

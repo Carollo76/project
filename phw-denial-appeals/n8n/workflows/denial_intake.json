@@ -3,56 +3,147 @@
   "nodes": [
     {
       "parameters": {
-        "httpMethod": "POST",
-        "path": "phw-denial-intake",
-        "options": {
-          "responseMode": "lastNode"
+        "rule": {
+          "interval": [
+            { "field": "hours", "hoursInterval": 12, "triggerAtHour": 8 },
+            { "field": "hours", "hoursInterval": 12, "triggerAtHour": 16 }
+          ]
         }
       },
-      "id": "webhook-trigger",
-      "name": "Webhook — Denial Intake",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2,
-      "position": [250, 300],
-      "webhookId": "phw-denial-intake"
+      "id": "cron-drchrono-poll",
+      "name": "Cron — DrChrono Poll (8 AM / 4 PM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 200]
     },
     {
       "parameters": {
-        "jsCode": "// Parse incoming denial data from DrChrono ERA/835 webhook or manual entry\nconst input = $input.first().json;\n\n// Determine input format\nlet inputData;\nlet source;\n\nif (input.era_835) {\n  // ERA/835 electronic remittance from DrChrono\n  inputData = input.era_835;\n  source = 'drchrono_era';\n} else if (input.manual_entry) {\n  // Manual entry from billing staff\n  inputData = input.manual_entry;\n  source = 'manual';\n} else {\n  // Raw body — treat as unstructured text\n  inputData = JSON.stringify(input);\n  source = 'raw';\n}\n\n// If structured data has required fields, skip Gemini classification\nlet needsClassification = true;\nlet parsedData = {};\n\nif (input.denial_code && input.patient_name && input.dos && input.denied_amount) {\n  needsClassification = false;\n  parsedData = {\n    denial_code: input.denial_code,\n    denial_label: {\n      'PTOT08A': 'MTB Reached',\n      'PTOT05': 'Non-Skilled',\n      'PTOT21': 'Re-eval Bundled',\n      'PTOT19': 'Dup Eval'\n    }[input.denial_code] || 'Unknown',\n    patient_name: input.patient_name,\n    member_id: input.member_id || '',\n    dos: input.dos,\n    denied_amount: parseFloat(input.denied_amount) || 0,\n    denial_date: input.denial_date || new Date().toISOString().split('T')[0],\n    plan_type: input.plan_type || 'Unknown',\n    claim_number: input.claim_number || '',\n    provider: input.provider || '',\n    location: input.location || '',\n    cpt_codes: input.cpt_codes || [],\n    npi: input.npi || ''\n  };\n}\n\nreturn [{\n  json: {\n    source,\n    needs_classification: needsClassification,\n    raw_input: inputData,\n    parsed_data: parsedData\n  }\n}];"
+        "method": "GET",
+        "url": "={{ $env.DRCHRONO_API_URL || 'https://app.drchrono.com/api' }}/line_items",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "since", "value": "={{ $now.minus({hours: 12}).toISO() }}" },
+            { "name": "status", "value": "denied" },
+            { "name": "page_size", "value": "50" }
+          ]
+        },
+        "options": { "timeout": 30000 }
       },
-      "id": "parse-input",
-      "name": "Parse Input Data",
+      "id": "drchrono-fetch-denials",
+      "name": "DrChrono — Fetch Denied Line Items",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [470, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURE_ME",
+          "name": "DrChrono API"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse DrChrono ERA/835 denied line items into individual items for processing\nconst response = $input.first().json;\nconst results = response.results || response.data || [];\n\nif (!results.length) {\n  // No new denials found — exit gracefully\n  return [{ json: { no_denials: true } }];\n}\n\n// Map each denied line item to our normalized format\nreturn results.map(item => ({\n  json: {\n    source: 'drchrono_era',\n    needs_classification: true,\n    raw_input: JSON.stringify(item),\n    era_data: {\n      line_item_id: item.id || '',\n      patient_name: (item.patient_first_name || '') + ' ' + (item.patient_last_name || ''),\n      dos: item.service_date || '',\n      denied_amount: parseFloat(item.billed_amount || item.balance || 0),\n      denial_code: item.denial_reason || item.adjustment_reason_code || '',\n      claim_number: item.claim_id || item.claim_number || '',\n      cpt_codes: item.procedure_code ? [item.procedure_code] : [],\n      provider: item.rendering_provider || item.billing_provider || '',\n      npi: item.provider_npi || '',\n      payer_name: item.insurance_name || item.payer_name || '',\n      member_id: item.member_id || item.insurance_id || '',\n      denial_date: item.posted_date || item.service_date || new Date().toISOString().split('T')[0]\n    }\n  }\n}));"
+      },
+      "id": "parse-drchrono-batch",
+      "name": "Parse DrChrono Batch",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [470, 300]
+      "position": [690, 200]
     },
     {
       "parameters": {
         "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict"
-          },
           "conditions": [
             {
-              "id": "needs-classification",
-              "leftValue": "={{ $json.needs_classification }}",
+              "id": "has-denials",
+              "leftValue": "={{ $json.no_denials }}",
               "rightValue": true,
-              "operator": {
-                "type": "boolean",
-                "operation": "equals"
-              }
+              "operator": { "type": "boolean", "operation": "notEquals" }
             }
           ],
           "combinator": "and"
         }
       },
-      "id": "check-classification",
-      "name": "Needs AI Classification?",
+      "id": "has-denials-check",
+      "name": "Has Denials?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [690, 300]
+      "position": [910, 200]
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [{ "mode": "everyMinute", "value": 2 }]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": "={{ $env.GOOGLE_DRIVE_DENIAL_INBOX_ID }}",
+        "event": "fileCreated",
+        "options": {}
+      },
+      "id": "gdrive-trigger",
+      "name": "Google Drive — Watch Denial Inbox",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [250, 600],
+      "credentials": {
+        "googleApi": {
+          "id": "CONFIGURE_ME",
+          "name": "Google Cloud — Drive/Docs"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": "={{ $json.id }}",
+        "options": {}
+      },
+      "id": "gdrive-download",
+      "name": "Google Drive — Download Scanned File",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [470, 600],
+      "credentials": {
+        "googleApi": {
+          "id": "CONFIGURE_ME",
+          "name": "Google Cloud — Drive/Docs"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare scanned denial for Gemini multimodal classification\nconst binaryData = $input.first().binary?.data;\nconst fileMetadata = $('Google Drive — Watch Denial Inbox').first().json;\n\nif (!binaryData) {\n  throw new Error('No binary data found — file download may have failed');\n}\n\nconst base64Content = binaryData.data;\nconst mimeType = binaryData.mimeType || fileMetadata.mimeType || 'application/pdf';\nconst fileName = fileMetadata.name || 'unknown_scan';\n\n// Validate mime type\nconst allowedTypes = ['application/pdf', 'image/png', 'image/jpeg', 'image/tiff', 'image/webp'];\nif (!allowedTypes.includes(mimeType)) {\n  return [{\n    json: {\n      parse_failed: true,\n      file_id: fileMetadata.id,\n      file_name: fileName,\n      error: `Unsupported file type: ${mimeType}. Accepted: PDF, PNG, JPEG, TIFF, WEBP`\n    }\n  }];\n}\n\n// Build Gemini multimodal request with inline image/PDF\nconst systemPrompt = `SYSTEM PROMPT — Denial Classification Agent (Multimodal/Scan)\\n\\nYou are a medical billing denial classification specialist for practices operating under the Prestige Health & Wellness (PHW) umbrella. PHW has 10 independent entities that each operate under their own legal name (e.g., FIDI Chiropractic PC). Denials are addressed to the specific entity, NOT to \\\"Prestige Health & Wellness.\\\"\\n\\nYOUR TASK:\\nAnalyze the scanned denial letter image/PDF provided and:\\n1. Extract the ENTITY NAME the denial is addressed to (the practice name on the letter)\\n2. Extract the PAYER NAME (insurance company sending the denial)\\n3. Classify the denial reason into one of the known codes if possible\\n4. Extract all structured data for pipeline processing\\n\\nKNOWN DENIAL CODES (Optum/UHC specific — may not apply to other payers):\\n1. PTOT08A — Maximum Therapy Benefit (MTB) Reached\\n2. PTOT05 — Non-Skilled Services\\n3. PTOT21 — Re-Evaluation Bundled\\n4. PTOT19 — Duplicate Evaluation\\n\\nIMPORTANT: If the payer is NOT Optum/UnitedHealthcare, or if the denial reason does not match the 4 known codes above, still extract all data fields but set denial_code to \\\"OTHER\\\" and provide the raw denial reason text in denial_label.\\n\\nOUTPUT FORMAT (strict JSON):\\n{\\n  \\\"classification\\\": {\\n    \\\"denial_code\\\": \\\"PTOT08A | PTOT05 | PTOT21 | PTOT19 | OTHER\\\",\\n    \\\"denial_label\\\": \\\"human-readable label or raw denial reason text\\\",\\n    \\\"confidence\\\": 0.0-1.0,\\n    \\\"reasoning\\\": \\\"brief explanation\\\",\\n    \\\"keywords_matched\\\": []\\n  },\\n  \\\"entity\\\": {\\n    \\\"name_on_denial\\\": \\\"exact practice name as shown on the denial letter\\\",\\n    \\\"address_on_denial\\\": \\\"practice address from the letter if visible\\\"\\n  },\\n  \\\"patient\\\": {\\n    \\\"name\\\": \\\"First Last\\\",\\n    \\\"dob\\\": \\\"YYYY-MM-DD\\\",\\n    \\\"member_id\\\": \\\"string\\\"\\n  },\\n  \\\"claim\\\": {\\n    \\\"claim_number\\\": \\\"string\\\",\\n    \\\"dos_start\\\": \\\"YYYY-MM-DD\\\",\\n    \\\"dos_end\\\": \\\"YYYY-MM-DD\\\",\\n    \\\"cpt_codes\\\": [],\\n    \\\"denied_amount\\\": 0.00,\\n    \\\"denial_date\\\": \\\"YYYY-MM-DD\\\"\\n  },\\n  \\\"payer\\\": {\\n    \\\"name\\\": \\\"exact payer name from the letter\\\",\\n    \\\"plan_type\\\": \\\"Fully Insured | Self-Funded (ERISA) | Unknown\\\"\\n  },\\n  \\\"provider\\\": {\\n    \\\"name\\\": \\\"treating provider name\\\",\\n    \\\"npi\\\": \\\"NPI if visible\\\"\\n  },\\n  \\\"filing_deadline\\\": \\\"YYYY-MM-DD\\\",\\n  \\\"urgency\\\": \\\"standard | urgent\\\",\\n  \\\"missing_fields\\\": [],\\n  \\\"scan_quality\\\": \\\"good | fair | poor\\\"\\n}\\n\\nRULES:\\n- Extract the EXACT entity/practice name as printed on the denial letter\\n- Extract the EXACT payer name — do NOT assume Optum/UHC\\n- If denial code is not one of the 4 known codes, set to \\\"OTHER\\\" with the raw reason in denial_label\\n- If confidence < 70%, set denial_code to \\\"OTHER\\\"\\n- Calculate filing_deadline as denial_date + 365 days\\n- Do NOT hallucinate — if a field is not visible, add to missing_fields\\n- Report scan_quality based on legibility`;\n\nconst requestBody = {\n  contents: [{\n    role: 'user',\n    parts: [\n      { text: systemPrompt },\n      {\n        inline_data: {\n          mime_type: mimeType,\n          data: base64Content\n        }\n      }\n    ]\n  }],\n  generationConfig: {\n    maxOutputTokens: 4096,\n    temperature: 0.1\n  }\n};\n\nreturn [{\n  json: {\n    request_body: JSON.stringify(requestBody),\n    file_id: fileMetadata.id,\n    file_name: fileName,\n    mime_type: mimeType,\n    source: 'gdrive_scan'\n  }\n}];"
+      },
+      "id": "prepare-multimodal",
+      "name": "Prepare Multimodal Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 600]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "mime-ok",
+              "leftValue": "={{ $json.parse_failed }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "mime-type-ok",
+      "name": "File Type Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [910, 600]
     },
     {
       "parameters": {
@@ -63,24 +154,19 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
+            { "name": "Content-Type", "value": "application/json" }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'SYSTEM PROMPT — PHW Denial Classification Agent\\n\\nYou are a medical billing denial classification specialist for Prestige Health & Wellness (PHW), an out-of-network physical and occupational therapy practice in Manhattan, NY. PHW treats patients insured by Optum/UnitedHealthcare.\\n\\nYOUR TASK: Analyze the incoming denial information and classify it into one of the 4 known denial codes. Extract all structured data needed for the Monday.com pipeline and appeal generation.\\n\\nKNOWN DENIAL CODES:\\n1. PTOT08A — Maximum Therapy Benefit (MTB) Reached\\n2. PTOT05 — Non-Skilled Services\\n3. PTOT21 — Re-Evaluation Bundled\\n4. PTOT19 — Duplicate Evaluation\\n\\nRETURN STRICT JSON with: classification (denial_code, denial_label, confidence, reasoning), patient (name, dob, member_id), claim (claim_number, dos_start, dos_end, cpt_codes, denied_amount, denial_date), payer (name, plan_type), provider (name, npi), filing_deadline, urgency, missing_fields.\\n\\n---\\nUSER INPUT:\\n' + $json.raw_input }] }], generationConfig: { maxOutputTokens: 4096, temperature: 0.1 } }) }}",
-        "options": {
-          "timeout": 60000
-        }
+        "jsonBody": "={{ $json.request_body }}",
+        "options": { "timeout": 120000 }
       },
-      "id": "gemini-classify",
-      "name": "Gemini — Classify Denial",
+      "id": "gemini-classify-scan",
+      "name": "Gemini — Classify Scanned Denial",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [910, 200],
+      "position": [1130, 500],
       "credentials": {
         "googleApi": {
           "id": "CONFIGURE_ME",
@@ -90,33 +176,204 @@
     },
     {
       "parameters": {
-        "jsCode": "// Parse Gemini classification response\nconst response = $input.first().json;\nlet text = '';\n\nif (response.candidates && response.candidates[0]) {\n  const parts = response.candidates[0].content?.parts || [];\n  text = parts.map(p => p.text || '').join('');\n}\n\n// Strip markdown code fences\ntext = text.trim();\nif (text.startsWith('```')) text = text.split('\\n').slice(1).join('\\n');\nif (text.endsWith('```')) text = text.slice(0, text.lastIndexOf('```'));\ntext = text.trim();\nif (text.startsWith('json')) text = text.slice(4).trim();\n\nlet classification;\ntry {\n  classification = JSON.parse(text);\n} catch (e) {\n  throw new Error(`Failed to parse Gemini response as JSON: ${e.message}. Raw: ${text.slice(0, 200)}`);\n}\n\nconst c = classification.classification || {};\nconst patient = classification.patient || {};\nconst claim = classification.claim || {};\nconst payer = classification.payer || {};\nconst provider = classification.provider || {};\n\n// Calculate filing deadline: denial_date + 365 days\nconst denialDate = claim.denial_date || new Date().toISOString().split('T')[0];\nconst deadline = new Date(denialDate);\ndeadline.setDate(deadline.getDate() + 365);\n\nreturn [{\n  json: {\n    denial_code: c.denial_code || 'UNKNOWN',\n    denial_label: c.denial_label || 'Unknown',\n    confidence: c.confidence || 0,\n    reasoning: c.reasoning || '',\n    patient_name: patient.name || 'Unknown Patient',\n    member_id: patient.member_id || '',\n    dos: claim.dos_start || '',\n    denied_amount: parseFloat(claim.denied_amount) || 0,\n    denial_date: denialDate,\n    filing_deadline: deadline.toISOString().split('T')[0],\n    plan_type: payer.plan_type || 'Unknown',\n    claim_number: claim.claim_number || '',\n    provider: provider.name || '',\n    npi: provider.npi || '',\n    cpt_codes: claim.cpt_codes || [],\n    location: '',\n    missing_fields: classification.missing_fields || [],\n    urgency: classification.urgency || 'standard',\n    source: 'gemini_classified'\n  }\n}];"
+        "jsCode": "// Parse Gemini multimodal classification response\nconst response = $input.first().json;\nconst scanMeta = $('Prepare Multimodal Request').first().json;\n\nlet text = '';\nif (response.candidates && response.candidates[0]) {\n  const parts = response.candidates[0].content?.parts || [];\n  text = parts.map(p => p.text || '').join('');\n}\n\n// Strip markdown code fences\ntext = text.trim();\nif (text.startsWith('```')) text = text.split('\\n').slice(1).join('\\n');\nif (text.endsWith('```')) text = text.slice(0, text.lastIndexOf('```'));\ntext = text.trim();\nif (text.startsWith('json')) text = text.slice(4).trim();\n\nlet classification;\ntry {\n  classification = JSON.parse(text);\n} catch (e) {\n  return [{\n    json: {\n      parse_failed: true,\n      file_id: scanMeta.file_id,\n      file_name: scanMeta.file_name,\n      error: `Failed to parse Gemini response: ${e.message}`,\n      raw_response: text.slice(0, 500)\n    }\n  }];\n}\n\nconst c = classification.classification || {};\nconst entity = classification.entity || {};\nconst patient = classification.patient || {};\nconst claim = classification.claim || {};\nconst payer = classification.payer || {};\nconst provider = classification.provider || {};\n\n// Check if Gemini could parse the document at all\nif (!patient.name && !claim.claim_number && !claim.dos_start) {\n  return [{\n    json: {\n      parse_failed: true,\n      file_id: scanMeta.file_id,\n      file_name: scanMeta.file_name,\n      error: 'Gemini could not extract any meaningful data from the scanned document',\n      scan_quality: classification.scan_quality || 'poor'\n    }\n  }];\n}\n\nconst denialDate = claim.denial_date || new Date().toISOString().split('T')[0];\nconst deadline = new Date(denialDate);\ndeadline.setDate(deadline.getDate() + 365);\n\nreturn [{\n  json: {\n    parse_failed: false,\n    denial_code: c.denial_code || 'OTHER',\n    denial_label: c.denial_label || 'Unknown',\n    confidence: c.confidence || 0,\n    reasoning: c.reasoning || '',\n    entity_name_on_denial: entity.name_on_denial || '',\n    entity_address_on_denial: entity.address_on_denial || '',\n    patient_name: patient.name || 'Unknown Patient',\n    member_id: patient.member_id || '',\n    dos: claim.dos_start || '',\n    denied_amount: parseFloat(claim.denied_amount) || 0,\n    denial_date: denialDate,\n    filing_deadline: deadline.toISOString().split('T')[0],\n    plan_type: payer.plan_type || 'Unknown',\n    payer_name: payer.name || 'Unknown',\n    claim_number: claim.claim_number || '',\n    provider: provider.name || '',\n    npi: provider.npi || '',\n    cpt_codes: claim.cpt_codes || [],\n    missing_fields: classification.missing_fields || [],\n    scan_quality: classification.scan_quality || 'unknown',\n    urgency: classification.urgency || 'standard',\n    source: 'gdrive_scan',\n    file_id: scanMeta.file_id,\n    file_name: scanMeta.file_name\n  }\n}];"
+      },
+      "id": "parse-scan-classification",
+      "name": "Parse Scan Classification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1350, 500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "scan-parse-ok",
+              "leftValue": "={{ $json.parse_failed }}",
+              "rightValue": false,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "scan-parsed-ok",
+      "name": "Scan Parsed OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1570, 500]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "fileId": "={{ $json.file_id }}",
+        "options": {
+          "addParents": "={{ $env.GOOGLE_DRIVE_PROCESSED_DENIALS_ID }}",
+          "removeParents": "={{ $env.GOOGLE_DRIVE_DENIAL_INBOX_ID }}"
+        }
+      },
+      "id": "gdrive-move-processed",
+      "name": "Google Drive — Move to Processed",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1790, 420],
+      "credentials": {
+        "googleApi": {
+          "id": "CONFIGURE_ME",
+          "name": "Google Cloud — Drive/Docs"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Forward scan classification data to the shared pipeline\n// (Google Drive Move node returns Drive API response, not our data)\nconst classData = $('Parse Scan Classification').first().json;\nreturn [{ json: classData }];"
+      },
+      "id": "forward-scan-data",
+      "name": "Forward Scan Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2010, 420]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "fileId": "={{ $json.file_id }}",
+        "options": {
+          "addParents": "={{ $env.GOOGLE_DRIVE_FAILED_DENIALS_ID }}",
+          "removeParents": "={{ $env.GOOGLE_DRIVE_DENIAL_INBOX_ID }}"
+        }
+      },
+      "id": "gdrive-move-failed",
+      "name": "Google Drive — Move to Failed",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1790, 650],
+      "credentials": {
+        "googleApi": {
+          "id": "CONFIGURE_ME",
+          "name": "Google Cloud — Drive/Docs"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.RINGCENTRAL_WEBHOOK_DENIALS }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ activity: 'PHW Denial Intake — SCAN ERROR', title: 'Failed to parse scanned denial: ' + ($json.file_name || $('Prepare Multimodal Request').first().json.file_name || 'unknown'), body: 'The system could not extract denial information from the scanned document.\\n\\nFile: ' + ($json.file_name || $('Prepare Multimodal Request').first().json.file_name || 'unknown') + '\\nError: ' + ($json.error || $('Parse Scan Classification').first().json.error || 'Unknown error') + '\\n\\nThe file has been moved to the Failed Denials folder.\\nPlease review manually and either:\\n1. Re-scan with better quality and drop into Denial Inbox again\\n2. Enter the denial data via the webhook fallback' }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "ringcentral-scan-error",
+      "name": "RingCentral — Scan Parse Failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2010, 650]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "phw-denial-intake",
+        "options": {
+          "responseMode": "lastNode"
+        }
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook — Manual Fallback",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 1000],
+      "webhookId": "phw-denial-intake"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse manual fallback entry (used when scan fails or for direct API integration)\nconst input = $input.first().json;\n\nlet needsClassification = true;\nlet parsedData = {};\n\nif (input.denial_code && input.patient_name && input.dos && input.denied_amount) {\n  needsClassification = false;\n  parsedData = {\n    denial_code: input.denial_code,\n    denial_label: {\n      'PTOT08A': 'MTB Reached',\n      'PTOT05': 'Non-Skilled',\n      'PTOT21': 'Re-eval Bundled',\n      'PTOT19': 'Dup Eval'\n    }[input.denial_code] || input.denial_label || 'Unknown',\n    patient_name: input.patient_name,\n    member_id: input.member_id || '',\n    dos: input.dos,\n    denied_amount: parseFloat(input.denied_amount) || 0,\n    denial_date: input.denial_date || new Date().toISOString().split('T')[0],\n    plan_type: input.plan_type || 'Unknown',\n    payer_name: input.payer_name || 'Unknown',\n    claim_number: input.claim_number || '',\n    provider: input.provider || '',\n    location: input.location || '',\n    cpt_codes: input.cpt_codes || [],\n    npi: input.npi || '',\n    entity_name_on_denial: input.entity_name || '',\n    source: 'manual_fallback'\n  };\n}\n\nreturn [{\n  json: {\n    source: 'manual_fallback',\n    needs_classification: needsClassification,\n    raw_input: needsClassification ? JSON.stringify(input) : '',\n    parsed_data: parsedData\n  }\n}];"
+      },
+      "id": "parse-manual-input",
+      "name": "Parse Manual Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 1000]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "needs-classification",
+              "leftValue": "={{ $json.needs_classification }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-classification",
+      "name": "Needs AI Classification?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [690, 1000]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://us-east1-aiplatform.googleapis.com/v1/projects/{{ $env.GCP_PROJECT_ID }}/locations/us-east1/publishers/google/models/gemini-2.5-pro:generateContent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'SYSTEM PROMPT — Denial Classification Agent\\n\\nYou are a medical billing denial classification specialist for practices under the Prestige Health & Wellness (PHW) umbrella. PHW has 10 independent entities, each with their own legal name. Denials are addressed to specific entities.\\n\\nYOUR TASK: Analyze the denial information and classify it. Extract entity name, payer name, and all structured data.\\n\\nKNOWN DENIAL CODES (Optum/UHC):\\n1. PTOT08A — Maximum Therapy Benefit (MTB) Reached\\n2. PTOT05 — Non-Skilled Services\\n3. PTOT21 — Re-Evaluation Bundled\\n4. PTOT19 — Duplicate Evaluation\\n\\nIf payer is NOT Optum/UHC or denial reason does not match known codes, set denial_code to \"OTHER\" with raw reason in denial_label.\\n\\nRETURN STRICT JSON with: classification (denial_code, denial_label, confidence, reasoning), entity (name_on_denial), patient (name, dob, member_id), claim (claim_number, dos_start, dos_end, cpt_codes, denied_amount, denial_date), payer (name, plan_type), provider (name, npi), filing_deadline, urgency, missing_fields.\\n\\n---\\nUSER INPUT:\\n' + $json.raw_input }] }], generationConfig: { maxOutputTokens: 4096, temperature: 0.1 } }) }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "gemini-classify",
+      "name": "Gemini — Classify Denial (Text)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [910, 900],
+      "credentials": {
+        "googleApi": {
+          "id": "CONFIGURE_ME",
+          "name": "Google Cloud — Vertex AI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Gemini text classification response\nconst response = $input.first().json;\nlet text = '';\n\nif (response.candidates && response.candidates[0]) {\n  const parts = response.candidates[0].content?.parts || [];\n  text = parts.map(p => p.text || '').join('');\n}\n\ntext = text.trim();\nif (text.startsWith('```')) text = text.split('\\n').slice(1).join('\\n');\nif (text.endsWith('```')) text = text.slice(0, text.lastIndexOf('```'));\ntext = text.trim();\nif (text.startsWith('json')) text = text.slice(4).trim();\n\nlet classification;\ntry {\n  classification = JSON.parse(text);\n} catch (e) {\n  throw new Error(`Failed to parse Gemini response: ${e.message}. Raw: ${text.slice(0, 200)}`);\n}\n\nconst c = classification.classification || {};\nconst entity = classification.entity || {};\nconst patient = classification.patient || {};\nconst claim = classification.claim || {};\nconst payer = classification.payer || {};\nconst provider = classification.provider || {};\n\nconst denialDate = claim.denial_date || new Date().toISOString().split('T')[0];\nconst deadline = new Date(denialDate);\ndeadline.setDate(deadline.getDate() + 365);\n\nreturn [{\n  json: {\n    denial_code: c.denial_code || 'OTHER',\n    denial_label: c.denial_label || 'Unknown',\n    confidence: c.confidence || 0,\n    reasoning: c.reasoning || '',\n    entity_name_on_denial: entity.name_on_denial || '',\n    patient_name: patient.name || 'Unknown Patient',\n    member_id: patient.member_id || '',\n    dos: claim.dos_start || '',\n    denied_amount: parseFloat(claim.denied_amount) || 0,\n    denial_date: denialDate,\n    filing_deadline: deadline.toISOString().split('T')[0],\n    plan_type: payer.plan_type || 'Unknown',\n    payer_name: payer.name || 'Unknown',\n    claim_number: claim.claim_number || '',\n    provider: provider.name || '',\n    npi: provider.npi || '',\n    cpt_codes: claim.cpt_codes || [],\n    location: '',\n    missing_fields: classification.missing_fields || [],\n    urgency: classification.urgency || 'standard',\n    source: 'gemini_classified'\n  }\n}];"
       },
       "id": "parse-classification",
       "name": "Parse Classification",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1130, 200]
+      "position": [1130, 900]
     },
     {
       "parameters": {
-        "jsCode": "// Pass through pre-parsed structured data (no AI needed)\nconst data = $input.first().json.parsed_data;\n\n// Calculate filing deadline if not present\nif (!data.filing_deadline) {\n  const denialDate = data.denial_date || new Date().toISOString().split('T')[0];\n  const deadline = new Date(denialDate);\n  deadline.setDate(deadline.getDate() + 365);\n  data.filing_deadline = deadline.toISOString().split('T')[0];\n}\n\n// Determine urgency\nconst today = new Date();\nconst deadlineDate = new Date(data.filing_deadline);\nconst daysRemaining = Math.ceil((deadlineDate - today) / (1000 * 60 * 60 * 24));\ndata.urgency = daysRemaining < 30 ? 'urgent' : 'standard';\ndata.source = 'structured_input';\n\nreturn [{ json: data }];"
+        "jsCode": "// Pass through pre-parsed structured data (no AI needed)\nconst data = $input.first().json.parsed_data;\n\nif (!data.filing_deadline) {\n  const denialDate = data.denial_date || new Date().toISOString().split('T')[0];\n  const deadline = new Date(denialDate);\n  deadline.setDate(deadline.getDate() + 365);\n  data.filing_deadline = deadline.toISOString().split('T')[0];\n}\n\nconst today = new Date();\nconst deadlineDate = new Date(data.filing_deadline);\nconst daysRemaining = Math.ceil((deadlineDate - today) / (1000 * 60 * 60 * 24));\ndata.urgency = daysRemaining < 30 ? 'urgent' : 'standard';\ndata.source = 'structured_input';\n\nreturn [{ json: data }];"
       },
       "id": "pass-structured",
       "name": "Use Structured Data",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [910, 420]
+      "position": [910, 1100]
     },
     {
       "parameters": {
-        "jsCode": "// Merge both paths into a single normalized item for Monday.com\nconst data = $input.first().json;\n\n// Build Monday.com column values JSON\nconst columnValues = {\n  // Denial Code (dropdown)\n  dropdown_mm0ffjcd: {\n    labels: [`${data.denial_code} - ${data.denial_label}`]\n  },\n  // DOS (date)\n  date_mm0fp9n1: {\n    date: data.dos || ''\n  },\n  // Amount (numbers)\n  numeric_mm0fh3jn: String(data.denied_amount || 0),\n  // Plan Type (dropdown)\n  dropdown_mm0fjy49: {\n    labels: [data.plan_type || 'Unknown']\n  },\n  // Denial Date\n  date_mm0frn70: {\n    date: data.denial_date || ''\n  },\n  // Filing Deadline\n  date_mm0fgzne: {\n    date: data.filing_deadline || ''\n  },\n  // Appeal Status (status) — set to New\n  color_mm0fj7fm: {\n    label: 'New'\n  },\n  // Provider (dropdown)\n  dropdown_mm0fdaya: data.provider ? { labels: [data.provider] } : {},\n  // Location (dropdown)\n  dropdown_mm0fac7b: data.location ? { labels: [data.location] } : {}\n};\n\nreturn [{\n  json: {\n    item_name: `${data.patient_name} — ${data.denial_code}`,\n    column_values: JSON.stringify(columnValues),\n    group_id: 'group_mm0fc0ne',  // New Denials\n    ...data\n  }\n}];"
+        "jsCode": "// ============================================================\n// ENTITY LOOKUP — Match entity name from denial to master config\n// ============================================================\n// Entity config is loaded from n8n static data or environment.\n// In production, this would reference config/entities.json via\n// a separate \"Read File\" or pre-loaded static data.\n//\n// For n8n, we store entities as a JSON string in an environment\n// variable (ENTITIES_CONFIG) or use the n8n static data feature.\n// ============================================================\n\nconst data = $input.first().json;\n\n// Parse entity config from environment variable\nlet entities = [];\ntry {\n  const raw = $env.ENTITIES_CONFIG || '[]';\n  entities = JSON.parse(raw);\n} catch (e) {\n  // Fallback: no entity config available\n  entities = [];\n}\n\n// The entity name extracted by Gemini from the denial letter\nconst entityNameOnDenial = (data.entity_name_on_denial || '').trim().toLowerCase();\n\n// Also check ERA data if coming from DrChrono path\nconst eraProvider = (data.era_entity_name || '').trim().toLowerCase();\nconst searchName = entityNameOnDenial || eraProvider;\n\nlet matchedEntity = null;\n\nif (searchName) {\n  // Tier 1: Exact match on entity_name\n  matchedEntity = entities.find(e =>\n    e.entity_name.toLowerCase() === searchName\n  );\n\n  // Tier 2: Match on aliases\n  if (!matchedEntity) {\n    matchedEntity = entities.find(e =>\n      (e.aliases || []).some(a => a.toLowerCase() === searchName)\n    );\n  }\n\n  // Tier 3: Fuzzy — entity name contained in search or vice versa\n  if (!matchedEntity) {\n    matchedEntity = entities.find(e =>\n      searchName.includes(e.entity_name.toLowerCase()) ||\n      e.entity_name.toLowerCase().includes(searchName)\n    );\n  }\n}\n\n// Build enriched data with entity information\nconst enriched = {\n  ...data,\n  // Entity fields (from config or blank for manual fill)\n  entity_id: matchedEntity?.id || '',\n  entity_name: matchedEntity?.entity_name || data.entity_name_on_denial || '',\n  entity_npi: matchedEntity?.npi || '',\n  entity_tax_id: matchedEntity?.tax_id || '',\n  entity_address: matchedEntity ? `${matchedEntity.address}, ${matchedEntity.city}, ${matchedEntity.state} ${matchedEntity.zip}` : '',\n  entity_phone: matchedEntity?.phone || '',\n  entity_fax: matchedEntity?.fax || '',\n  entity_specialty: matchedEntity?.specialty || '',\n  entity_matched: !!matchedEntity,\n  // Determine if this is a known payer with auto-appeal support\n  payer_name: data.payer_name || 'Unknown',\n  is_known_payer: (data.payer_name || '').toLowerCase().includes('optum') ||\n                  (data.payer_name || '').toLowerCase().includes('unitedhealthcare') ||\n                  (data.payer_name || '').toLowerCase().includes('uhc'),\n  // Determine if this is a known denial code with auto-appeal support\n  is_known_denial_code: ['PTOT08A', 'PTOT05', 'PTOT21', 'PTOT19'].includes(data.denial_code),\n  // Can we auto-draft an appeal?\n  can_auto_appeal: false  // Set below\n};\n\n// Auto-appeal only if: known payer + known denial code\nenriched.can_auto_appeal = enriched.is_known_payer && enriched.is_known_denial_code;\n\n// Determine appeal status based on what we can automate\nif (enriched.can_auto_appeal) {\n  enriched.initial_status = 'New';  // Will trigger auto-draft in WF2\n} else {\n  enriched.initial_status = 'Manual Review Required';  // Staff handles manually\n}\n\nreturn [{ json: enriched }];"
       },
-      "id": "build-monday-item",
-      "name": "Build Monday.com Item",
+      "id": "entity-lookup",
+      "name": "Entity Lookup",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1350, 300]
+      "position": [2230, 420]
     },
     {
       "parameters": {
@@ -127,24 +384,89 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
+            { "name": "API-Version", "value": "2024-10" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: 'query ($boardId: ID!, $columnId: String!, $value: String!) { items_page_by_column_values(board_id: $boardId, limit: 5, columns: [{column_id: $columnId, column_values: [$value]}]) { items { id name column_values(ids: [\"date_mm0fp9n1\", \"dropdown_mm0ffjcd\", \"text_entity_name\"]) { id text value } } } }', variables: { boardId: '18399605169', columnId: 'name', value: $json.patient_name } }) }}",
+        "options": { "timeout": 15000 }
+      },
+      "id": "check-duplicate",
+      "name": "Monday.com — Check Duplicate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2450, 420],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURE_ME",
+          "name": "Monday.com API"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check if a duplicate item already exists on the Monday.com board\n// Match criteria: same patient name + same DOS + same denial code\nconst data = $('Entity Lookup').first().json;\nconst dupeResponse = $input.first().json;\n\nconst existingItems = dupeResponse?.data?.items_page_by_column_values?.items || [];\nlet isDuplicate = false;\nlet existingItemId = null;\nlet existingItemName = null;\n\nfor (const item of existingItems) {\n  const columns = {};\n  for (const col of (item.column_values || [])) {\n    columns[col.id] = col.text || '';\n  }\n\n  // Check if DOS matches\n  const existingDos = columns['date_mm0fp9n1'] || '';\n  const existingCode = columns['dropdown_mm0ffjcd'] || '';\n\n  const dosMatch = existingDos && data.dos && existingDos === data.dos;\n  const codeMatch = existingCode && data.denial_code &&\n    existingCode.toLowerCase().includes(data.denial_code.toLowerCase());\n\n  if (dosMatch && codeMatch) {\n    isDuplicate = true;\n    existingItemId = item.id;\n    existingItemName = item.name;\n    break;\n  }\n}\n\nreturn [{\n  json: {\n    ...data,\n    is_duplicate: isDuplicate,\n    existing_item_id: existingItemId,\n    existing_item_name: existingItemName\n  }\n}];"
+      },
+      "id": "evaluate-duplicate",
+      "name": "Evaluate Duplicate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2670, 420]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
             {
-              "name": "API-Version",
-              "value": "2024-10"
+              "id": "not-duplicate",
+              "leftValue": "={{ $json.is_duplicate }}",
+              "rightValue": false,
+              "operator": { "type": "boolean", "operation": "equals" }
             }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "is-duplicate-check",
+      "name": "Is Duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2890, 420]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Monday.com item with entity data, payer info, and status\nconst data = $input.first().json;\n\nconst columnValues = {\n  // Denial Code (dropdown)\n  dropdown_mm0ffjcd: {\n    labels: [data.denial_code === 'OTHER'\n      ? `OTHER - ${(data.denial_label || 'Unknown').slice(0, 50)}`\n      : `${data.denial_code} - ${data.denial_label}`]\n  },\n  // DOS (date)\n  date_mm0fp9n1: { date: data.dos || '' },\n  // Amount (numbers)\n  numeric_mm0fh3jn: String(data.denied_amount || 0),\n  // Plan Type (dropdown)\n  dropdown_mm0fjy49: { labels: [data.plan_type || 'Unknown'] },\n  // Denial Date\n  date_mm0frn70: { date: data.denial_date || '' },\n  // Filing Deadline\n  date_mm0fgzne: { date: data.filing_deadline || '' },\n  // Appeal Status — \"New\" for auto-appeal, \"Manual Review Required\" otherwise\n  color_mm0fj7fm: { label: data.initial_status || 'New' },\n  // Provider (dropdown)\n  dropdown_mm0fdaya: data.provider ? { labels: [data.provider] } : {},\n  // Location (dropdown)\n  dropdown_mm0fac7b: data.location ? { labels: [data.location] } : {},\n  // Entity Name (text) — NEW COLUMN\n  text_entity_name: data.entity_name || data.entity_name_on_denial || '',\n  // Entity NPI (text) — NEW COLUMN\n  text_entity_npi: data.entity_npi || data.npi || '',\n  // Payer Name (text) — NEW COLUMN\n  text_payer_name: data.payer_name || ''\n};\n\nreturn [{\n  json: {\n    item_name: `${data.patient_name} — ${data.denial_code}`,\n    column_values: JSON.stringify(columnValues),\n    group_id: 'group_mm0fc0ne',\n    ...data\n  }\n}];"
+      },
+      "id": "build-monday-item",
+      "name": "Build Monday.com Item",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3110, 340]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.monday.com/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "API-Version", "value": "2024-10" }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ query: 'mutation ($boardId: ID!, $itemName: String!, $groupId: String!, $colValues: JSON!) { create_item(board_id: $boardId, item_name: $itemName, group_id: $groupId, column_values: $colValues) { id name } }', variables: { boardId: '18399605169', itemName: $json.item_name, groupId: $json.group_id, colValues: $json.column_values } }) }}",
-        "options": {
-          "timeout": 30000
-        }
+        "options": { "timeout": 30000 }
       },
       "id": "create-monday-item",
       "name": "Monday.com — Create Item",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1570, 300],
+      "position": [3330, 340],
       "credentials": {
         "httpHeaderAuth": {
           "id": "CONFIGURE_ME",
@@ -154,72 +476,194 @@
     },
     {
       "parameters": {
-        "jsCode": "// Extract Monday.com item ID and prepare alert message\nconst response = $input.first().json;\nconst item = response?.data?.create_item;\n\nif (!item || !item.id) {\n  throw new Error('Failed to create Monday.com item: ' + JSON.stringify(response));\n}\n\n// Get original data from earlier in the pipeline\nconst data = $('Build Monday.com Item').first().json;\n\nconst urgencyLabel = data.urgency === 'urgent' ? ' [URGENT]' : '';\nconst alertMessage = `New Denial Received${urgencyLabel}\\n` +\n  `Patient: ${data.patient_name}\\n` +\n  `Code: ${data.denial_code} — ${data.denial_label}\\n` +\n  `Amount: $${data.denied_amount}\\n` +\n  `DOS: ${data.dos}\\n` +\n  `Filing Deadline: ${data.filing_deadline}\\n` +\n  `Board: https://phw-team.monday.com/boards/18399605169`;\n\nreturn [{\n  json: {\n    monday_item_id: item.id,\n    monday_item_name: item.name,\n    alert_message: alertMessage,\n    ...data\n  }\n}];"
+        "jsCode": "// Prepare alert with entity, payer, and auto-appeal status info\nconst response = $input.first().json;\nconst item = response?.data?.create_item;\n\nif (!item || !item.id) {\n  throw new Error('Failed to create Monday.com item: ' + JSON.stringify(response));\n}\n\nconst data = $('Build Monday.com Item').first().json;\n\nconst urgencyLabel = data.urgency === 'urgent' ? ' [URGENT]' : '';\nlet statusNote = '';\n\nif (!data.is_known_payer) {\n  statusNote = '\\n\\n** NON-OPTUM PAYER: ' + data.payer_name + ' — Auto-appeal NOT available. Manual appeal required.';\n} else if (!data.is_known_denial_code) {\n  statusNote = '\\n\\n** UNKNOWN DENIAL CODE: ' + data.denial_code + ' (' + data.denial_label + ') — Auto-appeal NOT available. Manual appeal required.';\n}\n\nif (!data.entity_matched) {\n  statusNote += '\\n\\n** ENTITY NOT MATCHED: \"' + (data.entity_name_on_denial || 'unknown') + '\" not found in entity config. Please verify and update entities.json.';\n}\n\nlet sourceNote = '';\nif (data.source === 'gdrive_scan') {\n  sourceNote = '\\nSource: Scanned document (' + (data.file_name || 'unknown') + ')';\n  if (data.scan_quality && data.scan_quality !== 'good') {\n    sourceNote += '\\nScan Quality: ' + data.scan_quality + ' — please verify extracted data';\n  }\n} else if (data.source === 'drchrono_era') {\n  sourceNote = '\\nSource: DrChrono ERA/835 (electronic)';\n}\n\nconst alertMessage = `New Denial Received${urgencyLabel}\\n` +\n  `Entity: ${data.entity_name || 'Unknown'}\\n` +\n  `Patient: ${data.patient_name}\\n` +\n  `Payer: ${data.payer_name || 'Unknown'}\\n` +\n  `Code: ${data.denial_code} — ${data.denial_label}\\n` +\n  `Amount: $${data.denied_amount}\\n` +\n  `DOS: ${data.dos}\\n` +\n  `Filing Deadline: ${data.filing_deadline}\\n` +\n  `Status: ${data.initial_status}` +\n  sourceNote +\n  statusNote +\n  `\\n\\nBoard: https://phw-team.monday.com/boards/18399605169`;\n\nreturn [{\n  json: {\n    monday_item_id: item.id,\n    monday_item_name: item.name,\n    alert_message: alertMessage,\n    ...data\n  }\n}];"
       },
       "id": "prepare-alert",
       "name": "Prepare Alert",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1790, 300]
+      "position": [3550, 340]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.RINGCENTRAL_WEBHOOK_DENIALS || 'https://hooks.ringcentral.com/webhook/v2/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJvdCI6ImMiLCJvaSI6IjI4MzUxMDYyMDE3IiwiaWQiOiIzNTcxNjcxMDY3In0.rALUc4iM8E6t2O8_v5nf1RpHL-mjon3Qq2JgsNqDQI4' }}",
+        "url": "={{ $env.RINGCENTRAL_WEBHOOK_DENIALS }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ activity: 'PHW Denial Intake', title: 'New Denial: ' + $json.patient_name + ' — ' + $json.denial_code, body: $json.alert_message }) }}",
-        "options": {
-          "timeout": 10000
-        }
+        "jsonBody": "={{ JSON.stringify({ activity: 'PHW Denial Intake', title: 'New Denial: ' + ($json.entity_name || '') + ' — ' + $json.patient_name + ' — ' + $json.denial_code, body: $json.alert_message }) }}",
+        "options": { "timeout": 10000 }
       },
       "id": "ringcentral-alert",
       "name": "RingCentral — New Denial Alert",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2010, 300]
+      "position": [3770, 340]
     },
     {
       "parameters": {
-        "jsCode": "// Final response with success status\nconst data = $('Prepare Alert').first().json;\n\nreturn [{\n  json: {\n    status: 'success',\n    message: `Denial intake processed for ${data.patient_name}`,\n    monday_item_id: data.monday_item_id,\n    denial_code: data.denial_code,\n    filing_deadline: data.filing_deadline\n  }\n}];"
+        "jsCode": "// Handle duplicate — alert staff but do NOT create new item\nconst data = $input.first().json;\n\nconst alertMessage = `DUPLICATE DENIAL DETECTED\\n` +\n  `Patient: ${data.patient_name}\\n` +\n  `Code: ${data.denial_code} — ${data.denial_label}\\n` +\n  `DOS: ${data.dos}\\n` +\n  `Existing Item: ${data.existing_item_name} (ID: ${data.existing_item_id})\\n` +\n  `Source: ${data.source}\\n\\n` +\n  `No new Monday.com item created. The existing item has been preserved.\\n` +\n  `Board: https://phw-team.monday.com/boards/18399605169`;\n\nreturn [{\n  json: {\n    alert_message: alertMessage,\n    ...data\n  }\n}];"
       },
-      "id": "respond-success",
-      "name": "Respond — Success",
+      "id": "prepare-duplicate-alert",
+      "name": "Prepare Duplicate Alert",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2230, 300]
+      "position": [3110, 550]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.RINGCENTRAL_WEBHOOK_DENIALS }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ activity: 'PHW Denial Intake — Duplicate', title: 'Duplicate Denied: ' + $json.patient_name + ' — ' + $json.denial_code, body: $json.alert_message }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "ringcentral-duplicate-alert",
+      "name": "RingCentral — Duplicate Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3330, 550]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize DrChrono ERA data for the shared pipeline\nconst data = $input.first().json;\nconst era = data.era_data;\n\nreturn [{\n  json: {\n    denial_code: era.denial_code || 'OTHER',\n    denial_label: era.denial_code ? ({\n      'PTOT08A': 'MTB Reached',\n      'PTOT05': 'Non-Skilled',\n      'PTOT21': 'Re-eval Bundled',\n      'PTOT19': 'Dup Eval'\n    }[era.denial_code] || era.denial_code) : 'Unknown — from ERA',\n    patient_name: era.patient_name || 'Unknown Patient',\n    member_id: era.member_id || '',\n    dos: era.dos || '',\n    denied_amount: era.denied_amount || 0,\n    denial_date: era.denial_date || new Date().toISOString().split('T')[0],\n    plan_type: 'Unknown',\n    payer_name: era.payer_name || 'Unknown',\n    claim_number: era.claim_number || '',\n    provider: era.provider || '',\n    npi: era.npi || '',\n    cpt_codes: era.cpt_codes || [],\n    entity_name_on_denial: era.provider || '',\n    location: '',\n    missing_fields: [],\n    urgency: 'standard',\n    source: 'drchrono_era'\n  }\n}];"
+      },
+      "id": "normalize-era-data",
+      "name": "Normalize ERA Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1130, 120]
     }
   ],
   "connections": {
-    "Webhook — Denial Intake": {
+    "Cron — DrChrono Poll (8 AM / 4 PM)": {
       "main": [
-        [{ "node": "Parse Input Data", "type": "main", "index": 0 }]
+        [{ "node": "DrChrono — Fetch Denied Line Items", "type": "main", "index": 0 }]
       ]
     },
-    "Parse Input Data": {
+    "DrChrono — Fetch Denied Line Items": {
+      "main": [
+        [{ "node": "Parse DrChrono Batch", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse DrChrono Batch": {
+      "main": [
+        [{ "node": "Has Denials?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Has Denials?": {
+      "main": [
+        [{ "node": "Normalize ERA Data", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Normalize ERA Data": {
+      "main": [
+        [{ "node": "Entity Lookup", "type": "main", "index": 0 }]
+      ]
+    },
+    "Google Drive — Watch Denial Inbox": {
+      "main": [
+        [{ "node": "Google Drive — Download Scanned File", "type": "main", "index": 0 }]
+      ]
+    },
+    "Google Drive — Download Scanned File": {
+      "main": [
+        [{ "node": "Prepare Multimodal Request", "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare Multimodal Request": {
+      "main": [
+        [{ "node": "File Type Valid?", "type": "main", "index": 0 }]
+      ]
+    },
+    "File Type Valid?": {
+      "main": [
+        [{ "node": "Gemini — Classify Scanned Denial", "type": "main", "index": 0 }],
+        [{ "node": "Google Drive — Move to Failed", "type": "main", "index": 0 }]
+      ]
+    },
+    "Gemini — Classify Scanned Denial": {
+      "main": [
+        [{ "node": "Parse Scan Classification", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Scan Classification": {
+      "main": [
+        [{ "node": "Scan Parsed OK?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Scan Parsed OK?": {
+      "main": [
+        [{ "node": "Google Drive — Move to Processed", "type": "main", "index": 0 }],
+        [{ "node": "Google Drive — Move to Failed", "type": "main", "index": 0 }]
+      ]
+    },
+    "Google Drive — Move to Processed": {
+      "main": [
+        [{ "node": "Forward Scan Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Forward Scan Data": {
+      "main": [
+        [{ "node": "Entity Lookup", "type": "main", "index": 0 }]
+      ]
+    },
+    "Google Drive — Move to Failed": {
+      "main": [
+        [{ "node": "RingCentral — Scan Parse Failed", "type": "main", "index": 0 }]
+      ]
+    },
+    "Webhook — Manual Fallback": {
+      "main": [
+        [{ "node": "Parse Manual Input", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Manual Input": {
       "main": [
         [{ "node": "Needs AI Classification?", "type": "main", "index": 0 }]
       ]
     },
     "Needs AI Classification?": {
       "main": [
-        [{ "node": "Gemini — Classify Denial", "type": "main", "index": 0 }],
+        [{ "node": "Gemini — Classify Denial (Text)", "type": "main", "index": 0 }],
         [{ "node": "Use Structured Data", "type": "main", "index": 0 }]
       ]
     },
-    "Gemini — Classify Denial": {
+    "Gemini — Classify Denial (Text)": {
       "main": [
         [{ "node": "Parse Classification", "type": "main", "index": 0 }]
       ]
     },
     "Parse Classification": {
       "main": [
-        [{ "node": "Build Monday.com Item", "type": "main", "index": 0 }]
+        [{ "node": "Entity Lookup", "type": "main", "index": 0 }]
       ]
     },
     "Use Structured Data": {
       "main": [
-        [{ "node": "Build Monday.com Item", "type": "main", "index": 0 }]
+        [{ "node": "Entity Lookup", "type": "main", "index": 0 }]
+      ]
+    },
+    "Entity Lookup": {
+      "main": [
+        [{ "node": "Monday.com — Check Duplicate", "type": "main", "index": 0 }]
+      ]
+    },
+    "Monday.com — Check Duplicate": {
+      "main": [
+        [{ "node": "Evaluate Duplicate", "type": "main", "index": 0 }]
+      ]
+    },
+    "Evaluate Duplicate": {
+      "main": [
+        [{ "node": "Is Duplicate?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Is Duplicate?": {
+      "main": [
+        [{ "node": "Build Monday.com Item", "type": "main", "index": 0 }],
+        [{ "node": "Prepare Duplicate Alert", "type": "main", "index": 0 }]
       ]
     },
     "Build Monday.com Item": {
@@ -237,9 +681,9 @@
         [{ "node": "RingCentral — New Denial Alert", "type": "main", "index": 0 }]
       ]
     },
-    "RingCentral — New Denial Alert": {
+    "Prepare Duplicate Alert": {
       "main": [
-        [{ "node": "Respond — Success", "type": "main", "index": 0 }]
+        [{ "node": "RingCentral — Duplicate Alert", "type": "main", "index": 0 }]
       ]
     }
   },
@@ -258,16 +702,25 @@
     "templateCredsSetupCompleted": false
   },
   "_readme": {
-    "description": "PHW Denial Intake — Workflow 1 of 3",
-    "overview": "Receives denial data from DrChrono webhook or manual entry, classifies it using Gemini AI (if unstructured), creates a Monday.com item in the New Denials group, and sends a RingCentral alert to the billing team.",
+    "description": "PHW Denial Intake — Workflow 1 of 3 (Updated: multi-entity, multi-payer, scan intake, duplicate detection)",
+    "overview": "Three intake paths: (A) DrChrono ERA/835 polling 2x/day, (B) Google Drive scan-and-drop for paper denials, (C) Manual webhook fallback. All paths converge at Entity Lookup → Duplicate Check → Monday.com creation. Handles unknown payers and unknown denial codes by routing to Manual Review.",
     "setup_steps": [
       "1. Import this workflow into your n8n instance",
-      "2. Configure Google Cloud credential (service account with Vertex AI access)",
-      "3. Configure Monday.com HTTP Header Auth credential (Authorization: <your-token>)",
-      "4. Set environment variable: GCP_PROJECT_ID = your GCP project ID",
-      "5. Set environment variable: RINGCENTRAL_WEBHOOK_DENIALS = your RingCentral webhook URL",
-      "6. Activate the workflow — the webhook URL will be displayed in the Webhook node"
+      "2. Configure Google Cloud credentials (Vertex AI + Drive/Docs)",
+      "3. Configure Monday.com HTTP Header Auth credential",
+      "4. Configure DrChrono HTTP Header Auth credential",
+      "5. Set environment variables: GCP_PROJECT_ID, RINGCENTRAL_WEBHOOK_DENIALS",
+      "6. Set Google Drive folder IDs: GOOGLE_DRIVE_DENIAL_INBOX_ID, GOOGLE_DRIVE_PROCESSED_DENIALS_ID, GOOGLE_DRIVE_FAILED_DENIALS_ID",
+      "7. Set ENTITIES_CONFIG env var with JSON array from config/entities.json",
+      "8. Create 3 new Monday.com columns: text_entity_name, text_entity_npi, text_payer_name",
+      "9. Create Google Drive folders: Denial Inbox, Processed Denials, Failed Denials",
+      "10. Activate the workflow"
     ],
+    "intake_paths": {
+      "path_a": "DrChrono ERA/835 — Cron polls 2x/day (8 AM, 4 PM) for denied line items",
+      "path_b": "Google Drive scan — Staff drops scanned PDF/image into Denial Inbox folder",
+      "path_c": "Manual webhook — Fallback when scan fails, POST to /phw-denial-intake"
+    },
     "board_id": "18399605169",
     "column_ids": {
       "denial_code": "dropdown_mm0ffjcd",
@@ -280,7 +733,10 @@
       "appeal_letter": "link_mm0fsy2k",
       "provider": "dropdown_mm0fdaya",
       "location": "dropdown_mm0fac7b",
-      "outcome_amount": "numeric_mm0fvbv1"
+      "outcome_amount": "numeric_mm0fvbv1",
+      "entity_name": "text_entity_name",
+      "entity_npi": "text_entity_npi",
+      "payer_name": "text_payer_name"
     },
     "group_ids": {
       "new_denials": "group_mm0fc0ne",

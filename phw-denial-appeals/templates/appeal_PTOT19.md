@@ -11,9 +11,11 @@
 {{payer_address}}
 
 **From:**
-Prestige Health & Wellness
+{{entity_name}}
+{{entity_address}}
+Phone: {{entity_phone}} | Fax: {{entity_fax}}
+NPI: {{entity_npi}} | Tax ID: {{entity_tax_id}}
 {{provider_name}}, {{provider_credentials}}
-{{provider_npi}}
 
 **Patient:** {{patient_name}}
 **Date of Birth:** {{patient_dob}}
@@ -29,11 +31,11 @@ Prestige Health & Wellness
 
 ## Assignment of Benefits
 
-AOB on file authorizing Prestige Health & Wellness to bill, collect, and appeal on behalf of {{patient_name}}.
+AOB on file authorizing {{entity_name}} to bill, collect, and appeal on behalf of {{patient_name}}.
 
 ## Out-of-Network Provider Statement
 
-Prestige Health & Wellness is an out-of-network provider. Episode of care determination is a clinical decision and is not affected by network status.
+{{entity_name}} is an out-of-network provider. Episode of care determination is a clinical decision and is not affected by network status.
 
 ---
 
@@ -135,5 +137,7 @@ If denied, we will request **Federal External Review** through an IRO (29 CFR §
 **Respectfully submitted,**
 
 {{provider_name}}, {{provider_credentials}}
-NPI: {{provider_npi}}
-Prestige Health & Wellness
+{{entity_name}}
+{{entity_address}}
+Phone: {{entity_phone}} | Fax: {{entity_fax}}
+NPI: {{entity_npi}} | Tax ID: {{entity_tax_id}}

@@ -2,41 +2,48 @@
 
 ## Overview
 
-End-to-end automation for Optum/UHC denial appeals at Prestige Health & Wellness (PHW), an out-of-network PT/OT practice in Manhattan, NY. The system handles denial intake, AI-powered appeal letter drafting, deadline tracking, and escalation routing.
+End-to-end automation for insurance denial appeals across all 10 entities operating under the Prestige Health & Wellness (PHW) DBA. Each entity operates independently under its own legal name (e.g., FIDI Chiropractic PC). The system handles denial intake from multiple sources, AI-powered classification and appeal letter drafting, deadline tracking, escalation routing, and duplicate detection.
+
+**Multi-Entity:** Denials are addressed to specific entities, and appeal letters are sent from that entity's letterhead — never from "Prestige Health & Wellness."
+
+**Multi-Payer:** While auto-appeal is currently built for Optum/UHC denials, the system tracks ALL denials regardless of payer. Unknown payers or unknown denial codes are routed to staff for manual appeal.
 
 ## System Diagram
 
 ```
-DrChrono (EHR)                    Monday.com (Board 18399605169)
-  │ ERA/835 webhook                   │
-  │ LINE_ITEM_CREATE                  │ Status webhooks
-  │ LINE_ITEM_MODIFY                  │
-  ▼                                   ▼
-┌─────────────────────────────────────────────────┐
-│                  n8n (self-hosted)               │
-│                                                 │
-│  ┌──────────────┐  ┌──────────────────────┐     │
-│  │ WF1: Denial  │  │ WF2: Appeal          │     │
-│  │ Intake       │──│ Generation           │     │
-│  └──────────────┘  └──────────────────────┘     │
-│         │                    │                   │
-│         │          ┌────────────────────┐       │
-│         │          │ WF3: Alert &       │       │
-│         │          │ Escalation (cron)  │       │
-│         │          └────────────────────┘       │
-│         │                    │                   │
-│         ▼                    ▼                   │
-│  ┌──────────────────────────────────┐           │
-│  │ Vertex AI — Gemini 2.5 Pro      │           │
-│  │ (us-east1, HIPAA/BAA)           │           │
-│  └──────────────────────────────────┘           │
-└─────────────────────────────────────────────────┘
+Google Drive                DrChrono (EHR)              Monday.com (Board 18399605169)
+  │ "Denial Inbox"            │ Polled 2x/day             │
+  │ folder trigger             │ (8 AM + 4 PM)             │ Status webhooks
+  │ (scan & drop)              │                            │
+  ▼                            ▼                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    n8n (self-hosted)                         │
+│                                                             │
+│  ┌──────────────────────┐  ┌──────────────────────┐        │
+│  │ WF1: Denial Intake   │  │ WF2: Appeal          │        │
+│  │ (3 intake paths)     │──│ Generation           │        │
+│  │ + Entity Lookup      │  │ (entity-aware)       │        │
+│  │ + Duplicate Check    │  └──────────────────────┘        │
+│  └──────────────────────┘           │                      │
+│         │                  ┌────────────────────┐          │
+│         │                  │ WF3: Alert &       │          │
+│         │                  │ Escalation (cron)  │          │
+│         │                  └────────────────────┘          │
+│         ▼                           ▼                      │
+│  ┌──────────────────────────────────────────┐              │
+│  │ Vertex AI — Gemini 2.5 Pro              │              │
+│  │ (us-east1, HIPAA/BAA)                   │              │
+│  │ + Text classification (ERA/manual)      │              │
+│  │ + Multimodal classification (scans)     │              │
+│  │ + Appeal letter drafting                │              │
+│  └──────────────────────────────────────────┘              │
+└─────────────────────────────────────────────────────────────┘
         │              │              │
         ▼              ▼              ▼
   Monday.com     Google Drive    RingCentral
-  (items,        (appeal         (alerts to
-   groups,        letters)        billing team)
-   statuses)
+  (items,        (scan intake    (alerts to
+   groups,        + appeal        billing team)
+   statuses)      letters)
 ```
 
 ## Components
@@ -61,6 +68,9 @@ DrChrono (EHR)                    Monday.com (Board 18399605169)
 | Provider | dropdown | dropdown_mm0fdaya |
 | Location | dropdown | dropdown_mm0fac7b |
 | Outcome Amount | numbers | numeric_mm0fvbv1 |
+| Entity Name | text | text_entity_name |
+| Entity NPI | text | text_entity_npi |
+| Payer Name | text | text_payer_name |
 
 **Groups:**
 
@@ -72,45 +82,84 @@ DrChrono (EHR)                    Monday.com (Board 18399605169)
 | Resolved | group_mm0fmapq | Won, Lost, or Escalated outcomes |
 
 **Status Labels:**
-New → Drafted → Under Review → Submitted → Awaiting Decision → Won / Lost / Escalated
+New → Drafted → Under Review → Submitted → Awaiting Decision → Won / Lost / Escalated / Manual Review Required
 
 ### 2. n8n Workflows
 
 #### Workflow 1: Denial Intake (`denial_intake.json`)
 
-**Trigger:** Webhook (POST to `/phw-denial-intake`)
-**Source:** DrChrono ERA/835 webhook or manual entry
+**Three intake paths converging into a shared pipeline:**
 
 ```
-Webhook → Parse Input → Needs AI? ─┬─ Yes → Gemini Classify → Parse ─┐
-                                    └─ No  → Use Structured ──────────┘
-                                                                       │
-                    Monday.com Create Item ← Build Item ◄──────────────┘
-                              │
-                    Prepare Alert → RingCentral Notify → Response
+PATH A — Electronic (DrChrono ERA/835):
+  Cron (8 AM + 4 PM) → Poll DrChrono API → Parse batch
+  → Has denials? → Normalize ERA data ────────────────────────────┐
+                                                                    │
+PATH B — Scanned Paper Denials (Google Drive):                      │
+  GDrive Trigger (every 2 min) → Download file                     │
+  → Validate MIME type → Gemini multimodal classify                │
+  → Parsed OK? ─┬─ YES → Move to Processed → Forward data ────────┤
+                └─ NO  → Move to Failed → RingCentral error alert  │
+                                                                    │
+PATH C — Manual Fallback (Webhook POST):                            │
+  Webhook → Parse input → Needs AI? ─┬─ YES → Gemini text classify ┤
+                                      └─ NO  → Use structured data ─┘
+                                                                    │
+                          ALL PATHS CONVERGE HERE ◄─────────────────┘
+                                    │
+                          Entity Lookup (match entity name to config)
+                                    │
+                          Monday.com Duplicate Check (patient + DOS + code)
+                                    │
+                      ┌─ Not Duplicate ──────────┐
+                      │                          │
+                      │  Known Payer + Code?      │  Duplicate Found
+                      │  YES → status: "New"     │  → RingCentral duplicate alert
+                      │  NO  → status: "Manual   │  → No item created
+                      │         Review Required"  │
+                      │                          │
+                      │  Build Monday.com Item    │
+                      │  → Create Item            │
+                      │  → RingCentral Alert      │
+                      └──────────────────────────┘
 ```
 
 **Input formats accepted:**
-- DrChrono ERA/835 webhook payload (`{ era_835: {...} }`)
-- Manual structured entry (`{ denial_code, patient_name, dos, ... }`)
-- Raw/unstructured text (routed through Gemini classification)
+- DrChrono ERA/835 polling (electronic, 2x/day at 8 AM and 4 PM)
+- Scanned denial letter dropped into Google Drive "Denial Inbox" folder (PDF, PNG, JPEG, TIFF, WEBP) — processed via Gemini 2.5 Pro multimodal classification (no separate OCR step)
+- Manual webhook POST to `/phw-denial-intake` (fallback when scan fails)
+
+**Key features:**
+- **Multi-entity:** Gemini extracts entity name from denial, matched against `config/entities.json`
+- **Multi-payer:** System extracts exact payer name; non-Optum/UHC denials routed to manual review
+- **Unknown denial codes:** Codes not matching the 4 known types set to "OTHER" and routed to manual review
+- **Duplicate detection:** Checks Monday.com for existing items with same patient + DOS + denial code before creating
+- **DrChrono rate limits:** Polling 2x/day instead of webhooks — only ~10-20 API calls/day
 
 #### Workflow 2: Appeal Generation (`appeal_generation.json`)
 
 **Trigger:** Webhook from Monday.com status change (item set to "New")
 
 ```
-Monday.com Webhook → Status=New? ─┬─ Yes → Fetch Item Details
+Monday.com Webhook → Status=New? ─┬─ Yes → Fetch Item Details (including entity columns)
                                    └─ No  → Skip
+                                              │
+                              Entity Lookup (from ENTITIES_CONFIG env var)
                                               │
 DrChrono Fetch Clinical Docs ◄────────────────┘
           │
-Build Prompt → Gemini Draft → Parse Response
+Build Prompt (entity-aware — uses entity name, NOT "Prestige Health & Wellness")
           │
-Google Docs Create → Update Monday.com (Drafted + link) → Move to In Progress
+Gemini Draft → Parse Response
           │
-RingCentral Alert ("Appeal ready for review")
+Google Docs Create (titled: "Appeal — {Entity} — {Patient} — {Code} — {Date}")
+          │
+Update Monday.com (Drafted + link) → Move to In Progress
+          │
+RingCentral Alert ("Appeal ready for review" — includes entity name)
 ```
+
+**Entity-aware drafting:** The appeal prompt instructs Gemini to use the specific entity's name, address, NPI, tax ID, phone, and fax throughout the letter. The template variable `{{entity_name}}` replaces the former hardcoded "Prestige Health & Wellness."
 
 **Gemini prompt selects template by denial code:**
 - PTOT08A → `appeal_PTOT08A.md`
@@ -149,8 +198,9 @@ RingCentral Alert ("Appeal ready for review")
 
 | Prompt | File | Purpose |
 |--------|------|---------|
-| Classify Denial | `gemini/prompts/classify_denial.txt` | ERA/835 → structured JSON |
-| Draft Appeal | `gemini/prompts/draft_appeal.txt` | Classification + clinical docs → appeal letter |
+| Classify Denial | `gemini/prompts/classify_denial.txt` | Text/ERA → structured JSON (entity + payer aware) |
+| Classify Denial (Multimodal) | Embedded in `denial_intake.json` | Scanned PDF/image → structured JSON |
+| Draft Appeal | `gemini/prompts/draft_appeal.txt` | Classification + clinical docs → entity-specific appeal letter |
 | Doc Audit | `gemini/prompts/doc_audit.txt` | Phase 3: visit note → prevention flags |
 
 **Estimated cost:** $8–20/month at ~40 appeals/month
@@ -159,17 +209,12 @@ RingCentral Alert ("Appeal ready for review")
 
 **API Version:** v4 (Hunt Valley)
 **Auth:** OAuth 2.0 (Client ID + Secret)
-**Status:** API app to be created for this project
-
-**Webhook events needed:**
-- `LINE_ITEM_CREATE` — new claim line items (detects denials from ERA processing)
-- `LINE_ITEM_MODIFY` — updated line items (denial reason code changes)
-- `CLINICAL_NOTE_LOCK` — Phase 3: triggers doc audit when notes are finalized
+**Polling:** 2x/day via cron (8 AM + 4 PM) — avoids rate limits
 
 **API endpoints used:**
-- `GET /api/clinical_notes` — pull visit notes for appeal drafting
-- `GET /api/line_items` — pull claim/denial details
-- `GET /api/patients` — patient demographics
+- `GET /api/line_items?since=...&status=denied` — poll for denied line items (WF1)
+- `GET /api/clinical_notes` — pull visit notes for appeal drafting (WF2)
+- `GET /api/patients` — patient demographics (WF2)
 
 ### 5. RingCentral
 
@@ -178,16 +223,47 @@ RingCentral Alert ("Appeal ready for review")
 - PHW Doc Alerts — Phase 3 documentation audit feedback
 
 **Message types:**
-- New denial received
+- New denial received (includes entity name, payer, source)
+- Non-Optum payer detected (manual review required)
+- Unknown denial code detected (manual review required)
+- Entity not matched (config update needed)
+- Duplicate denial detected (no new item created)
+- Scan parse failed (file moved to Failed folder)
 - Appeal drafted and ready for review
 - Filing deadline approaching (30/14/7 days)
 - Escalation instructions (NY DFS or Federal)
 
 ### 6. Google Drive
 
-**Purpose:** Store generated appeal letters as Google Docs
+**Purpose:**
+1. **Intake:** Watch "Denial Inbox" folder for scanned paper denials
+2. **Output:** Store generated appeal letters as Google Docs
+
 **Auth:** Google Cloud service account with Drive/Docs scope
-**Folder:** To be configured (set `GOOGLE_DRIVE_FOLDER_ID` env var)
+
+**Folder Structure:**
+```
+PHW Denial Appeals/
+├── Denial Inbox/          ← Staff drops scanned denial letters here
+│                            (GOOGLE_DRIVE_DENIAL_INBOX_ID)
+├── Processed Denials/     ← Successfully parsed scans moved here automatically
+│                            (GOOGLE_DRIVE_PROCESSED_DENIALS_ID)
+├── Failed Denials/        ← Scans that could not be parsed; staff reviews manually
+│                            (GOOGLE_DRIVE_FAILED_DENIALS_ID)
+└── Appeal Letters/        ← Generated appeal letter Google Docs
+                             (GOOGLE_DRIVE_FOLDER_ID)
+```
+
+### 7. Entity Configuration (`config/entities.json`)
+
+Master list of all 10 PHW entities. Each entity includes:
+- `entity_name` — Legal name (e.g., "FIDI Chiropractic PC")
+- `aliases` — Alternative names for fuzzy matching
+- `npi`, `tax_id` — Billing identifiers
+- `address`, `phone`, `fax` — Contact information
+- `specialty` — Entity specialty type
+
+Entity matching is performed by Gemini extracting the practice name from the denial letter, then matching against this config using exact match → alias match → fuzzy/contains match.
 
 ## Environment Variables
 
@@ -200,36 +276,50 @@ Set these in your n8n instance (Settings → Variables):
 | `RINGCENTRAL_WEBHOOK_DOC_ALERTS` | RingCentral webhook URL for doc audit (Phase 3) |
 | `DRCHRONO_API_URL` | DrChrono API base URL (default: `https://app.drchrono.com/api`) |
 | `GOOGLE_DRIVE_FOLDER_ID` | Google Drive folder for appeal letters |
+| `GOOGLE_DRIVE_DENIAL_INBOX_ID` | Google Drive folder for scanned denial intake |
+| `GOOGLE_DRIVE_PROCESSED_DENIALS_ID` | Google Drive folder for processed scans |
+| `GOOGLE_DRIVE_FAILED_DENIALS_ID` | Google Drive folder for failed-to-parse scans |
+| `ENTITIES_CONFIG` | JSON string of entity master data (from config/entities.json) |
 
 ## n8n Credentials to Configure
 
 | Credential | Type | Used By |
 |------------|------|---------|
 | Google Cloud — Vertex AI | Google API (OAuth2) | WF1 (classify), WF2 (draft) |
-| Google Cloud — Drive/Docs | Google API (OAuth2) | WF2 (create appeal doc) |
+| Google Cloud — Drive/Docs | Google API (OAuth2) | WF1 (scan intake), WF2 (create appeal doc) |
 | Monday.com API | HTTP Header Auth (`Authorization: <token>`) | WF1, WF2, WF3 |
-| DrChrono API | HTTP Header Auth (`Authorization: Bearer <token>`) | WF2 (clinical docs) |
+| DrChrono API | HTTP Header Auth (`Authorization: Bearer <token>`) | WF1 (poll), WF2 (clinical docs) |
 
 ## Denial Code Coverage
 
-| Code | Label | Template | Appeal Strategy |
-|------|-------|----------|-----------------|
-| PTOT08A | MTB Reached | `appeal_PTOT08A.md` | Outcome measures + Jimmo v. Sebelius |
-| PTOT05 | Non-Skilled | `appeal_PTOT05.md` | Clinical reasoning + real-time modifications |
-| PTOT21 | Re-eval Bundled | `appeal_PTOT21.md` | Triggering event + CPT distinction |
-| PTOT19 | Dup Eval | `appeal_PTOT19.md` | New episode + distinct ICD-10 codes |
+| Code | Label | Template | Appeal Strategy | Auto-Appeal? |
+|------|-------|----------|-----------------|--------------|
+| PTOT08A | MTB Reached | `appeal_PTOT08A.md` | Outcome measures + Jimmo v. Sebelius | Yes (Optum) |
+| PTOT05 | Non-Skilled | `appeal_PTOT05.md` | Clinical reasoning + real-time modifications | Yes (Optum) |
+| PTOT21 | Re-eval Bundled | `appeal_PTOT21.md` | Triggering event + CPT distinction | Yes (Optum) |
+| PTOT19 | Dup Eval | `appeal_PTOT19.md` | New episode + distinct ICD-10 codes | Yes (Optum) |
+| OTHER | Unknown | — | Manual review required | No |
 
 ## Data Flow — Full Appeal Lifecycle
 
 ```
 1. DENIAL RECEIVED
-   DrChrono ERA/835 → n8n Webhook → Gemini classifies → Monday.com item created
-   → RingCentral: "New denial: Jane Doe — PTOT08A — $850"
+   Path A: DrChrono ERA/835 (polled 2x/day) → n8n normalizes → Entity Lookup
+   Path B: Staff scans paper denial → drops PDF in Google Drive Inbox
+           → n8n detects (2 min) → Gemini multimodal classifies → Entity Lookup
+   Path C: Manual webhook POST (fallback) → n8n parses → Entity Lookup
 
-2. APPEAL DRAFTED
-   Monday.com status=New → n8n pulls clinical docs → Gemini drafts letter
+   → Entity matched to config? (name, NPI, address, phone, fax, tax ID)
+   → Duplicate check (patient + DOS + code against Monday.com board)
+   → Known payer + known code? → Status: "New" (auto-appeal) or "Manual Review Required"
+   → Monday.com item created
+   → RingCentral: "New denial: FIDI Chiropractic PC — Jane Doe — PTOT08A — $850"
+
+2. APPEAL DRAFTED (auto-appeal path only)
+   Monday.com status=New → n8n pulls entity details + clinical docs
+   → Gemini drafts entity-specific letter (FROM: FIDI Chiropractic PC, NOT PHW)
    → Google Doc created → Monday.com updated (Drafted + link)
-   → RingCentral: "Appeal ready for review"
+   → RingCentral: "Appeal ready for review — FIDI Chiropractic PC"
 
 3. HUMAN REVIEW
    Billing team reviews in Google Doc → edits as needed
@@ -237,7 +327,7 @@ Set these in your n8n instance (Settings → Variables):
 
 4. TRACKING
    Daily cron checks deadlines → alerts at 30/14/7 days
-   → RingCentral: "[WARNING] Jane Doe — 14 days to filing deadline"
+   → RingCentral: "[WARNING] FIDI Chiropractic PC — Jane Doe — 14 days to deadline"
 
 5. OUTCOME
    Status → Won: item moves to Resolved, Outcome Amount recorded
@@ -246,6 +336,30 @@ Set these in your n8n instance (Settings → Variables):
      - Fully Insured → NY DFS External Appeal (§4914)
      - ERISA → Federal External Review (29 CFR §2590.715-2719)
 ```
+
+## Duplicate Detection
+
+**When:** After Entity Lookup, before Monday.com item creation.
+**How:** Query Monday.com board for items matching:
+- Tier 1: Same patient name + same DOS + same denial code (definitive match)
+- Tier 2: Same claim number if available
+
+**What happens on duplicate:**
+- No new Monday.com item created
+- RingCentral alert: "Duplicate denial detected — existing item preserved"
+- File moved to "Processed Denials" (if from Google Drive scan path)
+- Prevents duplicate appeals from being drafted when the same denial arrives via ERA and paper
+
+## Unknown Payer / Unknown Code Handling
+
+| Scenario | Monday.com Status | Auto-Appeal? | Staff Action |
+|----------|------------------|--------------|--------------|
+| Known payer (Optum) + Known code (PTOT08A/05/21/19) | New | Yes | Review drafted appeal |
+| Known payer (Optum) + Unknown code | Manual Review Required | No | Draft appeal manually |
+| Unknown payer (Aetna, Cigna, etc.) + Any code | Manual Review Required | No | Draft appeal manually |
+| Unknown payer + Unknown code | Manual Review Required | No | Draft appeal manually |
+
+All denials are tracked in Monday.com regardless — nothing gets lost.
 
 ## HIPAA Compliance
 
@@ -256,6 +370,10 @@ Set these in your n8n instance (Settings → Variables):
 - Monday.com stores metadata only (no clinical notes)
 - DrChrono ↔ n8n over HTTPS with OAuth2
 - n8n self-hosted on BAA-covered infrastructure
+- Scanned denial letters are processed in-memory only (base64 in n8n → Vertex AI)
+- No scanned document content persisted in n8n execution logs
+- Google Drive folders within BAA-covered Google Workspace
+- Files moved (not copied) from Inbox to Processed/Failed to minimize PHI exposure window
 
 ## File Structure
 
@@ -263,23 +381,24 @@ Set these in your n8n instance (Settings → Variables):
 phw-denial-appeals/
 ├── config/
 │   ├── denial_codes.json           # 4 denial code strategies
-│   └── escalation_rules.json       # NY DFS vs ERISA routing
+│   ├── escalation_rules.json       # NY DFS vs ERISA routing
+│   └── entities.json               # 10 entity master data (name, NPI, address, etc.)
 ├── templates/
-│   ├── appeal_PTOT08A.md           # MTB Reached template
-│   ├── appeal_PTOT05.md            # Non-Skilled template
-│   ├── appeal_PTOT21.md            # Re-eval Bundled template
-│   └── appeal_PTOT19.md            # Dup Eval template
+│   ├── appeal_PTOT08A.md           # MTB Reached template (entity-aware)
+│   ├── appeal_PTOT05.md            # Non-Skilled template (entity-aware)
+│   ├── appeal_PTOT21.md            # Re-eval Bundled template (entity-aware)
+│   └── appeal_PTOT19.md            # Dup Eval template (entity-aware)
 ├── gemini/prompts/
-│   ├── classify_denial.txt         # Denial classification prompt
-│   ├── draft_appeal.txt            # Appeal letter generation prompt
+│   ├── classify_denial.txt         # Denial classification (multi-entity, multi-payer)
+│   ├── draft_appeal.txt            # Appeal letter generation (entity-aware)
 │   └── doc_audit.txt               # Prevention engine prompt (Phase 3)
 ├── monday/
 │   ├── monday_client.py            # GraphQL API client
 │   ├── setup_all.py                # Board + columns + groups setup
 │   └── finish_setup.py             # Manual finishing script
 ├── n8n/workflows/
-│   ├── denial_intake.json          # WF1: DrChrono → Monday.com
-│   ├── appeal_generation.json      # WF2: Monday.com → Gemini → Google Doc
+│   ├── denial_intake.json          # WF1: 3 intake paths → Entity → Duplicate → Monday.com
+│   ├── appeal_generation.json      # WF2: Monday.com → Gemini → entity-aware Google Doc
 │   └── alert_escalation.json       # WF3: Deadlines + Escalation
 ├── scripts/
 │   ├── test_vertex_ai.py           # Vertex AI connectivity test
