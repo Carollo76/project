@@ -261,7 +261,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.RINGCENTRAL_WEBHOOK_DENIALS || 'https://hooks.ringcentral.com/webhook/CONFIGURE_ME' }}",
+        "url": "={{ $env.RINGCENTRAL_WEBHOOK_DENIALS || 'https://hooks.ringcentral.com/webhook/v2/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJvdCI6ImMiLCJvaSI6IjI4MzUxMDYyMDE3IiwiaWQiOiIzNTcxNjcxMDY3In0.rALUc4iM8E6t2O8_v5nf1RpHL-mjon3Qq2JgsNqDQI4' }}",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ activity: 'PHW Appeal Generated', title: 'Appeal Drafted: ' + $json.patient_name + ' — ' + $json.denial_code, body: 'Appeal letter drafted and ready for review.\\n\\nPatient: ' + $json.patient_name + '\\nDenial Code: ' + $json.denial_code + '\\nEvidence Strength: ' + $json.evidence_strength + '\\n\\nDoc: ' + ($json.doc_url || 'N/A') + '\\nBoard: https://phw-team.monday.com/boards/18399605169\\n\\nPlease review the appeal letter before submission.' }) }}",

@@ -165,7 +165,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.RINGCENTRAL_WEBHOOK_DENIALS || 'https://hooks.ringcentral.com/webhook/CONFIGURE_ME' }}",
+        "url": "={{ $env.RINGCENTRAL_WEBHOOK_DENIALS || 'https://hooks.ringcentral.com/webhook/v2/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJvdCI6ImMiLCJvaSI6IjI4MzUxMDYyMDE3IiwiaWQiOiIzNTcxNjcxMDY3In0.rALUc4iM8E6t2O8_v5nf1RpHL-mjon3Qq2JgsNqDQI4' }}",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ activity: 'PHW Denial Intake', title: 'New Denial: ' + $json.patient_name + ' — ' + $json.denial_code, body: $json.alert_message }) }}",
