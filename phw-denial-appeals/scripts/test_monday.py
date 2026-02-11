@@ -29,15 +29,15 @@ BOARD_ID = "18399605169"
 EXPECTED_COLUMNS = {
     "Denial Code": "dropdown",
     "DOS": "date",
-    "Amount": "numeric",
+    "Amount": "numbers",
     "Plan Type": "dropdown",
     "Denial Date": "date",
     "Filing Deadline": "date",
-    "Appeal Status": "color",
+    "Appeal Status": "status",
     "Appeal Letter": "link",
     "Provider": "dropdown",
     "Location": "dropdown",
-    "Outcome Amount": "numeric",
+    "Outcome Amount": "numbers",
 }
 
 EXPECTED_GROUPS = ["New Denials", "In Progress", "Submitted", "Resolved"]
