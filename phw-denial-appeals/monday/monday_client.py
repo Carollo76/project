@@ -53,10 +53,10 @@ def delete_board(board_id, api_token=None):
 
 
 def create_board(name, workspace_id, description="", board_kind="public", api_token=None):
-    query = """mutation ($name: String!, $kind: BoardKind!, $ws: ID!, $desc: BoardCreationDescription) {
-        create_board(board_name: $name, board_kind: $kind, workspace_id: $ws, description: $desc) { id }
+    query = """mutation ($name: String!, $kind: BoardKind!, $ws: ID!) {
+        create_board(board_name: $name, board_kind: $kind, workspace_id: $ws) { id }
     }"""
-    variables = {"name": name, "kind": board_kind, "ws": workspace_id, "desc": description}
+    variables = {"name": name, "kind": board_kind, "ws": workspace_id}
     result = execute_query(query, variables, api_token)
     return result["data"]["create_board"]["id"]
 
