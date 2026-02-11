@@ -40,6 +40,9 @@ env/
 *.json
 portfolio_data.json
 
+# Allow PHW config JSONs
+!phw-denial-appeals/config/*.json
+
 # OS
 .DS_Store
 Thumbs.db

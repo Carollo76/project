@@ -1,0 +1,90 @@
+{
+  "escalation_rules": {
+    "fully_insured": {
+      "label": "Fully Insured (State-Regulated)",
+      "description": "Plans purchased directly from insurer, regulated by NY Department of Financial Services.",
+      "internal_appeal": {
+        "levels": 2,
+        "deadline_days": 180,
+        "notes": "Must exhaust internal appeal (2 levels) before external review."
+      },
+      "external_appeal": {
+        "authority": "NY Department of Financial Services (DFS)",
+        "type": "Independent External Review",
+        "binding": true,
+        "deadline_days": 120,
+        "deadline_note": "120 days from final internal denial (or 120 days from initial denial if urgent/concurrent review).",
+        "filing_url": "https://myportal.dfs.ny.gov/web/guest-applications/external-appeals",
+        "fee": "$25 (waivable for financial hardship)",
+        "review_timeframe": "30 days (standard), 72 hours (expedited)",
+        "key_citations": [
+          "NY Insurance Law §4914 — External Appeal Rights",
+          "11 NYCRR 410 — Utilization Review and External Appeal regulations",
+          "NY Public Health Law §4900-4910 — External appeal for HMO and insured plans"
+        ],
+        "required_documents": [
+          "Copy of final adverse determination (denial letter)",
+          "Clinical records supporting medical necessity",
+          "Provider's letter of medical necessity",
+          "Assignment of Benefits form",
+          "Patient authorization for appeal"
+        ]
+      }
+    },
+    "self_funded_erisa": {
+      "label": "Self-Funded / ERISA Plan",
+      "description": "Employer self-funded plans governed by federal ERISA law, not state insurance regulations.",
+      "internal_appeal": {
+        "levels": 2,
+        "deadline_days": 180,
+        "notes": "Must exhaust internal appeal (2 levels) before federal external review. ERISA requires plan to respond within 30 days (pre-service) or 60 days (post-service)."
+      },
+      "external_appeal": {
+        "authority": "Federal External Review (CMS/DOL)",
+        "type": "Independent Review Organization (IRO)",
+        "binding": true,
+        "deadline_days": 120,
+        "deadline_note": "120 days from receipt of final internal adverse benefit determination.",
+        "key_citations": [
+          "29 CFR §2590.715-2719 — Internal Claims and Appeals and External Review Processes",
+          "ACA §2719 — External review requirements for non-grandfathered plans",
+          "29 USC §1133 — ERISA Claims Procedure requirements",
+          "DOL Technical Release 2010-01 — External review process standards"
+        ],
+        "required_documents": [
+          "Copy of final adverse benefit determination",
+          "Plan's Summary Plan Description (SPD) showing external review rights",
+          "Clinical records supporting medical necessity",
+          "Provider's letter of medical necessity",
+          "Authorization forms as required by the IRO"
+        ],
+        "notes": [
+          "ERISA plans must use an accredited IRO for external review",
+          "Decision is binding on the plan",
+          "State external appeal (NY DFS) does NOT apply to self-funded ERISA plans",
+          "If plan fails to comply with claims procedure, claimant is deemed to have exhausted internal appeals"
+        ]
+      }
+    }
+  },
+  "routing_logic": {
+    "description": "Determine escalation path based on Plan Type field in Monday.com board.",
+    "rules": [
+      {
+        "plan_type_value": "Fully Insured",
+        "escalation_path": "fully_insured",
+        "alert_message": "ESCALATION: Fully Insured plan — file NY DFS External Appeal within {days_remaining} days."
+      },
+      {
+        "plan_type_value": "Self-Funded (ERISA)",
+        "escalation_path": "self_funded_erisa",
+        "alert_message": "ESCALATION: ERISA plan — file Federal External Review (IRO) within {days_remaining} days."
+      }
+    ]
+  },
+  "deadline_alerts": {
+    "thresholds_days": [30, 14, 7],
+    "alert_channels": ["ringcentral_phw_denials"],
+    "message_template": "DEADLINE ALERT: {patient_name} — {denial_code} appeal filing deadline in {days_remaining} days ({deadline_date}). Current status: {appeal_status}."
+  }
+}

@@ -28,7 +28,7 @@ from monday_client import (
 
 # Configuration
 WORKSPACE_ID = 11690254
-OLD_BOARD_IDS = [18399114481, 18399114818]
+OLD_BOARD_IDS = [18399114481]  # 18399114818 already deleted
 
 BOARD_NAME = "PHW Denial Appeals"
 BOARD_DESC = (

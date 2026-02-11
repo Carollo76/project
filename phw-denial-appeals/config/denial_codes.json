@@ -1,0 +1,144 @@
+{
+  "denial_codes": [
+    {
+      "code": "PTOT08A",
+      "label": "MTB Reached",
+      "description": "Maximum Therapy Benefit reached — payer claims patient has plateaued and further therapy is not medically necessary.",
+      "appeal_strategy": {
+        "primary_argument": "Patient has NOT reached maximum benefit — documented objective improvements in standardized outcome measures demonstrate continued skilled need.",
+        "key_evidence": [
+          "Standardized outcome measures showing continued improvement (FOTO, DASH, LEFS, NDI, ODI)",
+          "Objective data trending toward established functional goals",
+          "Exercise progression documentation (resistance, reps, complexity increases)",
+          "Functional milestone documentation (e.g., return to ADLs, work tasks)",
+          "Clinical reasoning for continued skilled intervention"
+        ],
+        "cms_citations": [
+          "CMS Medicare Benefit Policy Manual, Chapter 15, §220.2 — Reasonable and necessary skilled services",
+          "CMS Chapter 15, §220.2(B) — Expectation of improvement is NOT required; maintenance therapy qualifies if skilled care is needed",
+          "CMS Chapter 15, §220.3 — Coverage does not turn on the presence or absence of a patient's potential for improvement"
+        ],
+        "oon_arguments": [
+          "Out-of-network provider selected by patient for specialized expertise",
+          "Assignment of Benefits (AOB) on file — provider authorized to bill and appeal on patient's behalf",
+          "Medical necessity determination must be based on clinical evidence, not network status"
+        ]
+      },
+      "required_documentation": [
+        "Initial evaluation with baseline outcome measures",
+        "Progress notes showing objective improvement trends",
+        "Standardized outcome measure scores (at least 2 data points)",
+        "Updated plan of care with measurable goals",
+        "Exercise progression log"
+      ],
+      "typical_filing_deadline_days": 365,
+      "optum_internal_appeal_days": 180,
+      "ny_dfs_external_appeal_days": 120
+    },
+    {
+      "code": "PTOT05",
+      "label": "Non-Skilled",
+      "description": "Services deemed non-skilled — payer claims treatment could be performed by patient or non-licensed caregiver.",
+      "appeal_strategy": {
+        "primary_argument": "Services require the clinical judgment and expertise of a licensed therapist — cannot be safely or effectively self-administered.",
+        "key_evidence": [
+          "Clinical reasoning documentation for each intervention",
+          "Real-time modification documentation (adjusted technique, resistance, positioning during session)",
+          "Safety concerns requiring skilled supervision (fall risk, pain responses, compensatory patterns)",
+          "Complexity of condition requiring ongoing clinical assessment",
+          "Patient education components requiring professional instruction"
+        ],
+        "cms_citations": [
+          "CMS Chapter 15, §220.2(B) — Services are skilled when they require the expertise of a qualified therapist",
+          "CMS Chapter 15, §220.2(D) — Skilled therapy services include ongoing assessment and modification",
+          "Jimmo v. Sebelius Settlement (2013) — Maintenance therapy requiring skilled care is covered"
+        ],
+        "oon_arguments": [
+          "Out-of-network provider selected for specialized manual therapy techniques",
+          "AOB on file authorizing provider to bill and appeal",
+          "Skilled nature of services is determined by clinical complexity, not provider network status"
+        ]
+      },
+      "required_documentation": [
+        "Detailed visit notes with clinical reasoning for each intervention",
+        "Documentation of real-time modifications during treatment",
+        "Safety assessment and fall risk documentation",
+        "Rationale for why services cannot be self-administered",
+        "Patient response to treatment requiring clinical interpretation"
+      ],
+      "typical_filing_deadline_days": 365,
+      "optum_internal_appeal_days": 180,
+      "ny_dfs_external_appeal_days": 120
+    },
+    {
+      "code": "PTOT21",
+      "label": "Re-eval Bundled",
+      "description": "Re-evaluation bundled into treatment — payer denies separate payment for re-evaluation CPT code, claiming it is included in treatment visit.",
+      "appeal_strategy": {
+        "primary_argument": "Re-evaluation was medically necessary due to a triggering event and constitutes a comprehensive reassessment distinct from routine treatment.",
+        "key_evidence": [
+          "Triggering event documentation (change in condition, new diagnosis, post-surgical, return from absence)",
+          "Comprehensive reassessment evidence (new objective measurements, updated baselines)",
+          "Distinct ICD-10 codes or new clinical findings",
+          "New or substantially revised plan of care resulting from re-evaluation",
+          "CPT code distinction: 97164/97168 vs treatment codes"
+        ],
+        "cms_citations": [
+          "CPT Guidelines — Re-evaluation (97164/97168) is distinct from treatment and requires a triggering event",
+          "CMS Chapter 15, §220.1 — Re-evaluation is a covered service when clinically indicated",
+          "NCCI Edits — 97164/97168 are not inherently bundled with treatment codes when documented appropriately"
+        ],
+        "oon_arguments": [
+          "Re-evaluation necessity is a clinical determination independent of network status",
+          "AOB on file — provider authorized to bill separately for distinct services",
+          "Bundling edit applied incorrectly — triggering event and comprehensive reassessment documented"
+        ]
+      },
+      "required_documentation": [
+        "Documentation of triggering event with date",
+        "Comprehensive re-evaluation with new objective measurements",
+        "Comparison of previous vs. current status",
+        "New or revised plan of care with updated goals",
+        "Distinct time documentation for re-eval vs. treatment on same day"
+      ],
+      "typical_filing_deadline_days": 365,
+      "optum_internal_appeal_days": 180,
+      "ny_dfs_external_appeal_days": 120
+    },
+    {
+      "code": "PTOT19",
+      "label": "Dup Eval",
+      "description": "Duplicate evaluation — payer denies evaluation claiming a prior evaluation already exists for this patient/condition.",
+      "appeal_strategy": {
+        "primary_argument": "This evaluation is for a new episode of care, distinct diagnosis, or different body region — not a duplicate of the prior evaluation.",
+        "key_evidence": [
+          "New episode of care documentation (prior episode discharged/closed)",
+          "Distinct ICD-10 diagnosis codes from prior evaluation",
+          "Different body region or clinical presentation",
+          "New referral or prescription from physician",
+          "Provider change justification (if applicable)"
+        ],
+        "cms_citations": [
+          "CPT Guidelines — New evaluation is appropriate for new episode of care or new condition",
+          "CMS Chapter 15, §220.1 — Initial evaluation is covered for each new episode of care",
+          "NCCI Edits — Evaluation codes are not duplicative when clinical distinction is documented"
+        ],
+        "oon_arguments": [
+          "Episode of care determination is clinical, not administrative",
+          "AOB on file — provider authorized to evaluate and bill for distinct episodes",
+          "Prior evaluation by different provider/setting does not preclude new evaluation for new episode"
+        ]
+      },
+      "required_documentation": [
+        "Prior episode discharge summary or documentation of closure",
+        "New referral or physician prescription",
+        "Distinct ICD-10 codes or new clinical presentation",
+        "Documentation of different body region or condition (if applicable)",
+        "New evaluation with independent baseline measurements"
+      ],
+      "typical_filing_deadline_days": 365,
+      "optum_internal_appeal_days": 180,
+      "ny_dfs_external_appeal_days": 120
+    }
+  ]
+}
