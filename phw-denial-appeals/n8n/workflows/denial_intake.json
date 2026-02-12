@@ -709,11 +709,11 @@
       "2. Configure Google Cloud credentials (Vertex AI + Drive/Docs)",
       "3. Configure Monday.com HTTP Header Auth credential",
       "4. Configure DrChrono HTTP Header Auth credential",
-      "5. Set environment variables: GCP_PROJECT_ID, RINGCENTRAL_WEBHOOK_DENIALS",
-      "6. Set Google Drive folder IDs: GOOGLE_DRIVE_DENIAL_INBOX_ID, GOOGLE_DRIVE_PROCESSED_DENIALS_ID, GOOGLE_DRIVE_FAILED_DENIALS_ID",
-      "7. Set ENTITIES_CONFIG env var with JSON array from config/entities.json",
-      "8. Create 3 new Monday.com columns: text_mm0gr7ga, text_mm0gv12z, text_mm0gw2sh",
-      "9. Create Google Drive folders: Denial Inbox, Processed Denials, Failed Denials",
+      "5. Edit n8n/ecosystem.config.js — fill in all CONFIGURE_ME values (GCP project, Drive folder IDs, RingCentral webhook, etc.)",
+      "6. Edit config/entities.json — fill in real entity data (ecosystem.config.js auto-loads it)",
+      "7. Start n8n via PM2: pm2 start n8n/ecosystem.config.js",
+      "8. Create Google Drive folders: Denial Inbox, Processed Denials, Failed Denials",
+      "9. Monday.com columns already exist: text_mm0gr7ga (Entity Name), text_mm0gv12z (Entity NPI), text_mm0gw2sh (Payer Name)",
       "10. Activate the workflow"
     ],
     "intake_paths": {

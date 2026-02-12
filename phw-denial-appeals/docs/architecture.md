@@ -267,7 +267,20 @@ Entity matching is performed by Gemini extracting the practice name from the den
 
 ## Environment Variables
 
-Set these in your n8n instance (Settings → Variables):
+**Note:** n8n's built-in Variables feature (Settings → Variables) requires a paid plan. Since we run n8n Community (self-hosted) with PM2, all environment variables are set via the PM2 ecosystem config file instead. The `$env.VARIABLE_NAME` syntax in workflows works identically for both approaches.
+
+**Config file:** `n8n/ecosystem.config.js`
+
+```bash
+# Start n8n with all env vars:
+pm2 start n8n/ecosystem.config.js
+
+# After editing any config (including entities.json):
+pm2 restart n8n
+
+# View logs:
+pm2 logs n8n
+```
 
 | Variable | Description |
 |----------|-------------|
@@ -279,7 +292,7 @@ Set these in your n8n instance (Settings → Variables):
 | `GOOGLE_DRIVE_DENIAL_INBOX_ID` | Google Drive folder for scanned denial intake |
 | `GOOGLE_DRIVE_PROCESSED_DENIALS_ID` | Google Drive folder for processed scans |
 | `GOOGLE_DRIVE_FAILED_DENIALS_ID` | Google Drive folder for failed-to-parse scans |
-| `ENTITIES_CONFIG` | JSON string of entity master data (from config/entities.json) |
+| `ENTITIES_CONFIG` | Auto-loaded from `config/entities.json` by ecosystem.config.js — no manual paste needed |
 
 ## n8n Credentials to Configure
 
@@ -396,10 +409,12 @@ phw-denial-appeals/
 │   ├── monday_client.py            # GraphQL API client
 │   ├── setup_all.py                # Board + columns + groups setup
 │   └── finish_setup.py             # Manual finishing script
-├── n8n/workflows/
-│   ├── denial_intake.json          # WF1: 3 intake paths → Entity → Duplicate → Monday.com
-│   ├── appeal_generation.json      # WF2: Monday.com → Gemini → entity-aware Google Doc
-│   └── alert_escalation.json       # WF3: Deadlines + Escalation
+├── n8n/
+│   ├── ecosystem.config.js         # PM2 config — all env vars (free alternative to paid Variables)
+│   └── workflows/
+│       ├── denial_intake.json      # WF1: 3 intake paths → Entity → Duplicate → Monday.com
+│       ├── appeal_generation.json  # WF2: Monday.com → Gemini → entity-aware Google Doc
+│       └── alert_escalation.json   # WF3: Deadlines + Escalation
 ├── scripts/
 │   ├── test_vertex_ai.py           # Vertex AI connectivity test
 │   ├── test_monday.py              # Monday.com API test

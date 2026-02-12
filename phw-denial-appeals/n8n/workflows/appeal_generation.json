@@ -386,7 +386,7 @@
       "2. Configure Google Cloud credential (Vertex AI + Docs/Drive access)",
       "3. Configure Monday.com HTTP Header Auth credential",
       "4. Configure DrChrono HTTP Header Auth credential (when available)",
-      "5. Set env vars: GCP_PROJECT_ID, RINGCENTRAL_WEBHOOK_DENIALS",
+      "5. Env vars are set via PM2 ecosystem.config.js (see n8n/ecosystem.config.js)",
       "6. In Monday.com board settings, create a webhook integration that sends to this workflow's URL when Appeal Status changes",
       "7. Activate the workflow"
     ],
