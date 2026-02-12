@@ -68,9 +68,9 @@ Google Drive                DrChrono (EHR)              Monday.com (Board 183996
 | Provider | dropdown | dropdown_mm0fdaya |
 | Location | dropdown | dropdown_mm0fac7b |
 | Outcome Amount | numbers | numeric_mm0fvbv1 |
-| Entity Name | text | text_entity_name |
-| Entity NPI | text | text_entity_npi |
-| Payer Name | text | text_payer_name |
+| Entity Name | text | text_mm0gr7ga |
+| Entity NPI | text | text_mm0gv12z |
+| Payer Name | text | text_mm0gw2sh |
 
 **Groups:**
 

@@ -389,7 +389,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ query: 'query ($boardId: ID!, $columnId: String!, $value: String!) { items_page_by_column_values(board_id: $boardId, limit: 5, columns: [{column_id: $columnId, column_values: [$value]}]) { items { id name column_values(ids: [\"date_mm0fp9n1\", \"dropdown_mm0ffjcd\", \"text_entity_name\"]) { id text value } } } }', variables: { boardId: '18399605169', columnId: 'name', value: $json.patient_name } }) }}",
+        "jsonBody": "={{ JSON.stringify({ query: 'query ($boardId: ID!, $columnId: String!, $value: String!) { items_page_by_column_values(board_id: $boardId, limit: 5, columns: [{column_id: $columnId, column_values: [$value]}]) { items { id name column_values(ids: [\"date_mm0fp9n1\", \"dropdown_mm0ffjcd\", \"text_mm0gr7ga\"]) { id text value } } } }', variables: { boardId: '18399605169', columnId: 'name', value: $json.patient_name } }) }}",
         "options": { "timeout": 15000 }
       },
       "id": "check-duplicate",
@@ -437,7 +437,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Build Monday.com item with entity data, payer info, and status\nconst data = $input.first().json;\n\nconst columnValues = {\n  // Denial Code (dropdown)\n  dropdown_mm0ffjcd: {\n    labels: [data.denial_code === 'OTHER'\n      ? `OTHER - ${(data.denial_label || 'Unknown').slice(0, 50)}`\n      : `${data.denial_code} - ${data.denial_label}`]\n  },\n  // DOS (date)\n  date_mm0fp9n1: { date: data.dos || '' },\n  // Amount (numbers)\n  numeric_mm0fh3jn: String(data.denied_amount || 0),\n  // Plan Type (dropdown)\n  dropdown_mm0fjy49: { labels: [data.plan_type || 'Unknown'] },\n  // Denial Date\n  date_mm0frn70: { date: data.denial_date || '' },\n  // Filing Deadline\n  date_mm0fgzne: { date: data.filing_deadline || '' },\n  // Appeal Status — \"New\" for auto-appeal, \"Manual Review Required\" otherwise\n  color_mm0fj7fm: { label: data.initial_status || 'New' },\n  // Provider (dropdown)\n  dropdown_mm0fdaya: data.provider ? { labels: [data.provider] } : {},\n  // Location (dropdown)\n  dropdown_mm0fac7b: data.location ? { labels: [data.location] } : {},\n  // Entity Name (text) — NEW COLUMN\n  text_entity_name: data.entity_name || data.entity_name_on_denial || '',\n  // Entity NPI (text) — NEW COLUMN\n  text_entity_npi: data.entity_npi || data.npi || '',\n  // Payer Name (text) — NEW COLUMN\n  text_payer_name: data.payer_name || ''\n};\n\nreturn [{\n  json: {\n    item_name: `${data.patient_name} — ${data.denial_code}`,\n    column_values: JSON.stringify(columnValues),\n    group_id: 'group_mm0fc0ne',\n    ...data\n  }\n}];"
+        "jsCode": "// Build Monday.com item with entity data, payer info, and status\nconst data = $input.first().json;\n\nconst columnValues = {\n  // Denial Code (dropdown)\n  dropdown_mm0ffjcd: {\n    labels: [data.denial_code === 'OTHER'\n      ? `OTHER - ${(data.denial_label || 'Unknown').slice(0, 50)}`\n      : `${data.denial_code} - ${data.denial_label}`]\n  },\n  // DOS (date)\n  date_mm0fp9n1: { date: data.dos || '' },\n  // Amount (numbers)\n  numeric_mm0fh3jn: String(data.denied_amount || 0),\n  // Plan Type (dropdown)\n  dropdown_mm0fjy49: { labels: [data.plan_type || 'Unknown'] },\n  // Denial Date\n  date_mm0frn70: { date: data.denial_date || '' },\n  // Filing Deadline\n  date_mm0fgzne: { date: data.filing_deadline || '' },\n  // Appeal Status — \"New\" for auto-appeal, \"Manual Review Required\" otherwise\n  color_mm0fj7fm: { label: data.initial_status || 'New' },\n  // Provider (dropdown)\n  dropdown_mm0fdaya: data.provider ? { labels: [data.provider] } : {},\n  // Location (dropdown)\n  dropdown_mm0fac7b: data.location ? { labels: [data.location] } : {},\n  // Entity Name (text) — NEW COLUMN\n  text_mm0gr7ga: data.entity_name || data.entity_name_on_denial || '',\n  // Entity NPI (text) — NEW COLUMN\n  text_mm0gv12z: data.entity_npi || data.npi || '',\n  // Payer Name (text) — NEW COLUMN\n  text_mm0gw2sh: data.payer_name || ''\n};\n\nreturn [{\n  json: {\n    item_name: `${data.patient_name} — ${data.denial_code}`,\n    column_values: JSON.stringify(columnValues),\n    group_id: 'group_mm0fc0ne',\n    ...data\n  }\n}];"
       },
       "id": "build-monday-item",
       "name": "Build Monday.com Item",
@@ -712,7 +712,7 @@
       "5. Set environment variables: GCP_PROJECT_ID, RINGCENTRAL_WEBHOOK_DENIALS",
       "6. Set Google Drive folder IDs: GOOGLE_DRIVE_DENIAL_INBOX_ID, GOOGLE_DRIVE_PROCESSED_DENIALS_ID, GOOGLE_DRIVE_FAILED_DENIALS_ID",
       "7. Set ENTITIES_CONFIG env var with JSON array from config/entities.json",
-      "8. Create 3 new Monday.com columns: text_entity_name, text_entity_npi, text_payer_name",
+      "8. Create 3 new Monday.com columns: text_mm0gr7ga, text_mm0gv12z, text_mm0gw2sh",
       "9. Create Google Drive folders: Denial Inbox, Processed Denials, Failed Denials",
       "10. Activate the workflow"
     ],
@@ -734,9 +734,9 @@
       "provider": "dropdown_mm0fdaya",
       "location": "dropdown_mm0fac7b",
       "outcome_amount": "numeric_mm0fvbv1",
-      "entity_name": "text_entity_name",
-      "entity_npi": "text_entity_npi",
-      "payer_name": "text_payer_name"
+      "entity_name": "text_mm0gr7ga",
+      "entity_npi": "text_mm0gv12z",
+      "payer_name": "text_mm0gw2sh"
     },
     "group_ids": {
       "new_denials": "group_mm0fc0ne",
