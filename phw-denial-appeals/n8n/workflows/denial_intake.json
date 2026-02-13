@@ -20,8 +20,13 @@
       "parameters": {
         "method": "GET",
         "url": "={{ $env.DRCHRONO_API_URL || 'https://app.drchrono.com/api' }}/line_items",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpHeaderAuth",
+        "authentication": "noAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.DRCHRONO_API_TOKEN }}" }
+          ]
+        },
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
@@ -37,12 +42,6 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [470, 200],
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "CONFIGURE_ME",
-          "name": "DrChrono API"
-        }
-      },
       "continueOnFail": true
     },
     {
@@ -77,53 +76,122 @@
     },
     {
       "parameters": {
-        "pollTimes": {
-          "item": [{ "mode": "everyMinute", "value": 2 }]
-        },
-        "triggerOn": "specificFolder",
-        "folderToWatch": "={{ $env.GOOGLE_DRIVE_DENIAL_INBOX_ID }}",
-        "event": "fileCreated",
-        "options": {}
+        "rule": {
+          "interval": [
+            { "field": "minutes", "minutesInterval": 2 }
+          ]
+        }
       },
       "id": "gdrive-trigger",
       "name": "Google Drive — Watch Denial Inbox",
-      "type": "n8n-nodes-base.googleDriveTrigger",
-      "typeVersion": 1,
-      "position": [250, 600],
-      "credentials": {
-        "googleApi": {
-          "id": "CONFIGURE_ME",
-          "name": "Google Cloud — Drive/Docs"
-        }
-      }
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 600]
     },
     {
       "parameters": {
-        "operation": "download",
-        "fileId": "={{ $json.id }}",
-        "options": {}
+        "jsCode": "// Get Google OAuth2 access token from service account\nconst crypto = require('crypto');\n\nconst saJson = $env.GOOGLE_SERVICE_ACCOUNT_JSON;\nif (!saJson) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON env var not set');\n\nconst sa = JSON.parse(saJson);\n\n// Build JWT\nconst header = { alg: 'RS256', typ: 'JWT' };\nconst now = Math.floor(Date.now() / 1000);\nconst payload = {\n  iss: sa.client_email,\n  scope: 'https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/documents',\n  aud: 'https://oauth2.googleapis.com/token',\n  iat: now,\n  exp: now + 3600\n};\n\nconst b64url = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');\nconst unsigned = b64url(header) + '.' + b64url(payload);\n\nconst sign = crypto.createSign('RSA-SHA256');\nsign.update(unsigned);\nconst signature = sign.sign(sa.private_key, 'base64url');\n\nconst jwt = unsigned + '.' + signature;\n\n// Exchange JWT for access token\nconst resp = await this.helpers.httpRequest({\n  method: 'POST',\n  url: 'https://oauth2.googleapis.com/token',\n  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },\n  body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`\n});\n\nreturn [{ json: { google_access_token: resp.access_token } }];"
+      },
+      "id": "get-google-token-scan",
+      "name": "Get Google Token (Scan Path)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 600]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/drive/v3/files",
+        "authentication": "noAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $json.google_access_token }}" }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "q", "value": "='{{ $env.GOOGLE_DRIVE_DENIAL_INBOX_ID }}' in parents and trashed = false" },
+            { "name": "fields", "value": "files(id,name,mimeType,createdTime)" },
+            { "name": "orderBy", "value": "createdTime desc" },
+            { "name": "pageSize", "value": "10" }
+          ]
+        },
+        "options": { "timeout": 30000 }
+      },
+      "id": "gdrive-list-inbox",
+      "name": "Google Drive — List Inbox Files",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [690, 600]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Split Drive file list into individual items for processing\nconst response = $input.first().json;\nconst token = $('Get Google Token (Scan Path)').first().json.google_access_token;\nconst files = response.files || [];\n\nif (!files.length) {\n  return [{ json: { no_files: true } }];\n}\n\nreturn files.map(f => ({\n  json: {\n    id: f.id,\n    name: f.name,\n    mimeType: f.mimeType,\n    createdTime: f.createdTime,\n    google_access_token: token\n  }\n}));"
+      },
+      "id": "split-inbox-files",
+      "name": "Split Inbox Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 600]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "has-files",
+              "leftValue": "={{ $json.no_files }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "has-inbox-files",
+      "name": "Has Inbox Files?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1130, 600]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $json.id }}?alt=media",
+        "authentication": "noAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $json.google_access_token }}" }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": false,
+              "responseFormat": "file"
+            }
+          }
+        }
       },
       "id": "gdrive-download",
       "name": "Google Drive — Download Scanned File",
-      "type": "n8n-nodes-base.googleDrive",
-      "typeVersion": 3,
-      "position": [470, 600],
-      "credentials": {
-        "googleApi": {
-          "id": "CONFIGURE_ME",
-          "name": "Google Cloud — Drive/Docs"
-        }
-      }
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1350, 500]
     },
     {
       "parameters": {
-        "jsCode": "// Prepare scanned denial for Gemini multimodal classification\nconst binaryData = $input.first().binary?.data;\nconst fileMetadata = $('Google Drive — Watch Denial Inbox').first().json;\n\nif (!binaryData) {\n  throw new Error('No binary data found — file download may have failed');\n}\n\nconst base64Content = binaryData.data;\nconst mimeType = binaryData.mimeType || fileMetadata.mimeType || 'application/pdf';\nconst fileName = fileMetadata.name || 'unknown_scan';\n\n// Validate mime type\nconst allowedTypes = ['application/pdf', 'image/png', 'image/jpeg', 'image/tiff', 'image/webp'];\nif (!allowedTypes.includes(mimeType)) {\n  return [{\n    json: {\n      parse_failed: true,\n      file_id: fileMetadata.id,\n      file_name: fileName,\n      error: `Unsupported file type: ${mimeType}. Accepted: PDF, PNG, JPEG, TIFF, WEBP`\n    }\n  }];\n}\n\n// Build Gemini multimodal request with inline image/PDF\nconst systemPrompt = `SYSTEM PROMPT — Denial Classification Agent (Multimodal/Scan)\\n\\nYou are a medical billing denial classification specialist for practices operating under the Prestige Health & Wellness (PHW) umbrella. PHW has 10 independent entities that each operate under their own legal name (e.g., FIDI Chiropractic PC). Denials are addressed to the specific entity, NOT to \\\"Prestige Health & Wellness.\\\"\\n\\nYOUR TASK:\\nAnalyze the scanned denial letter image/PDF provided and:\\n1. Extract the ENTITY NAME the denial is addressed to (the practice name on the letter)\\n2. Extract the PAYER NAME (insurance company sending the denial)\\n3. Classify the denial reason into one of the known codes if possible\\n4. Extract all structured data for pipeline processing\\n\\nKNOWN DENIAL CODES (Optum/UHC specific — may not apply to other payers):\\n1. PTOT08A — Maximum Therapy Benefit (MTB) Reached\\n2. PTOT05 — Non-Skilled Services\\n3. PTOT21 — Re-Evaluation Bundled\\n4. PTOT19 — Duplicate Evaluation\\n\\nIMPORTANT: If the payer is NOT Optum/UnitedHealthcare, or if the denial reason does not match the 4 known codes above, still extract all data fields but set denial_code to \\\"OTHER\\\" and provide the raw denial reason text in denial_label.\\n\\nOUTPUT FORMAT (strict JSON):\\n{\\n  \\\"classification\\\": {\\n    \\\"denial_code\\\": \\\"PTOT08A | PTOT05 | PTOT21 | PTOT19 | OTHER\\\",\\n    \\\"denial_label\\\": \\\"human-readable label or raw denial reason text\\\",\\n    \\\"confidence\\\": 0.0-1.0,\\n    \\\"reasoning\\\": \\\"brief explanation\\\",\\n    \\\"keywords_matched\\\": []\\n  },\\n  \\\"entity\\\": {\\n    \\\"name_on_denial\\\": \\\"exact practice name as shown on the denial letter\\\",\\n    \\\"address_on_denial\\\": \\\"practice address from the letter if visible\\\"\\n  },\\n  \\\"patient\\\": {\\n    \\\"name\\\": \\\"First Last\\\",\\n    \\\"dob\\\": \\\"YYYY-MM-DD\\\",\\n    \\\"member_id\\\": \\\"string\\\"\\n  },\\n  \\\"claim\\\": {\\n    \\\"claim_number\\\": \\\"string\\\",\\n    \\\"dos_start\\\": \\\"YYYY-MM-DD\\\",\\n    \\\"dos_end\\\": \\\"YYYY-MM-DD\\\",\\n    \\\"cpt_codes\\\": [],\\n    \\\"denied_amount\\\": 0.00,\\n    \\\"denial_date\\\": \\\"YYYY-MM-DD\\\"\\n  },\\n  \\\"payer\\\": {\\n    \\\"name\\\": \\\"exact payer name from the letter\\\",\\n    \\\"plan_type\\\": \\\"Fully Insured | Self-Funded (ERISA) | Unknown\\\"\\n  },\\n  \\\"provider\\\": {\\n    \\\"name\\\": \\\"treating provider name\\\",\\n    \\\"npi\\\": \\\"NPI if visible\\\"\\n  },\\n  \\\"filing_deadline\\\": \\\"YYYY-MM-DD\\\",\\n  \\\"urgency\\\": \\\"standard | urgent\\\",\\n  \\\"missing_fields\\\": [],\\n  \\\"scan_quality\\\": \\\"good | fair | poor\\\"\\n}\\n\\nRULES:\\n- Extract the EXACT entity/practice name as printed on the denial letter\\n- Extract the EXACT payer name — do NOT assume Optum/UHC\\n- If denial code is not one of the 4 known codes, set to \\\"OTHER\\\" with the raw reason in denial_label\\n- If confidence < 70%, set denial_code to \\\"OTHER\\\"\\n- Calculate filing_deadline as denial_date + 365 days\\n- Do NOT hallucinate — if a field is not visible, add to missing_fields\\n- Report scan_quality based on legibility`;\n\nconst requestBody = {\n  contents: [{\n    role: 'user',\n    parts: [\n      { text: systemPrompt },\n      {\n        inline_data: {\n          mime_type: mimeType,\n          data: base64Content\n        }\n      }\n    ]\n  }],\n  generationConfig: {\n    maxOutputTokens: 4096,\n    temperature: 0.1\n  }\n};\n\nreturn [{\n  json: {\n    request_body: JSON.stringify(requestBody),\n    file_id: fileMetadata.id,\n    file_name: fileName,\n    mime_type: mimeType,\n    source: 'gdrive_scan'\n  }\n}];"
+        "jsCode": "// Prepare scanned denial for Gemini multimodal classification\nconst binaryData = $input.first().binary?.data;\nconst fileMetadata = $('Split Inbox Files').first().json;\n\nif (!binaryData) {\n  throw new Error('No binary data found — file download may have failed');\n}\n\nconst base64Content = binaryData.data;\nconst mimeType = binaryData.mimeType || fileMetadata.mimeType || 'application/pdf';\nconst fileName = fileMetadata.name || 'unknown_scan';\n\n// Validate mime type\nconst allowedTypes = ['application/pdf', 'image/png', 'image/jpeg', 'image/tiff', 'image/webp'];\nif (!allowedTypes.includes(mimeType)) {\n  return [{\n    json: {\n      parse_failed: true,\n      file_id: fileMetadata.id,\n      file_name: fileName,\n      error: `Unsupported file type: ${mimeType}. Accepted: PDF, PNG, JPEG, TIFF, WEBP`\n    }\n  }];\n}\n\n// Build Gemini multimodal request with inline image/PDF\nconst systemPrompt = `SYSTEM PROMPT — Denial Classification Agent (Multimodal/Scan)\\n\\nYou are a medical billing denial classification specialist for practices operating under the Prestige Health & Wellness (PHW) umbrella. PHW has 10 independent entities that each operate under their own legal name (e.g., FIDI Chiropractic PC). Denials are addressed to the specific entity, NOT to \\\"Prestige Health & Wellness.\\\"\\n\\nYOUR TASK:\\nAnalyze the scanned denial letter image/PDF provided and:\\n1. Extract the ENTITY NAME the denial is addressed to (the practice name on the letter)\\n2. Extract the PAYER NAME (insurance company sending the denial)\\n3. Classify the denial reason into one of the known codes if possible\\n4. Extract all structured data for pipeline processing\\n\\nKNOWN DENIAL CODES (Optum/UHC specific — may not apply to other payers):\\n1. PTOT08A — Maximum Therapy Benefit (MTB) Reached\\n2. PTOT05 — Non-Skilled Services\\n3. PTOT21 — Re-Evaluation Bundled\\n4. PTOT19 — Duplicate Evaluation\\n\\nIMPORTANT: If the payer is NOT Optum/UnitedHealthcare, or if the denial reason does not match the 4 known codes above, still extract all data fields but set denial_code to \\\"OTHER\\\" and provide the raw denial reason text in denial_label.\\n\\nOUTPUT FORMAT (strict JSON):\\n{\\n  \\\"classification\\\": {\\n    \\\"denial_code\\\": \\\"PTOT08A | PTOT05 | PTOT21 | PTOT19 | OTHER\\\",\\n    \\\"denial_label\\\": \\\"human-readable label or raw denial reason text\\\",\\n    \\\"confidence\\\": 0.0-1.0,\\n    \\\"reasoning\\\": \\\"brief explanation\\\",\\n    \\\"keywords_matched\\\": []\\n  },\\n  \\\"entity\\\": {\\n    \\\"name_on_denial\\\": \\\"exact practice name as shown on the denial letter\\\",\\n    \\\"address_on_denial\\\": \\\"practice address from the letter if visible\\\"\\n  },\\n  \\\"patient\\\": {\\n    \\\"name\\\": \\\"First Last\\\",\\n    \\\"dob\\\": \\\"YYYY-MM-DD\\\",\\n    \\\"member_id\\\": \\\"string\\\"\\n  },\\n  \\\"claim\\\": {\\n    \\\"claim_number\\\": \\\"string\\\",\\n    \\\"dos_start\\\": \\\"YYYY-MM-DD\\\",\\n    \\\"dos_end\\\": \\\"YYYY-MM-DD\\\",\\n    \\\"cpt_codes\\\": [],\\n    \\\"denied_amount\\\": 0.00,\\n    \\\"denial_date\\\": \\\"YYYY-MM-DD\\\"\\n  },\\n  \\\"payer\\\": {\\n    \\\"name\\\": \\\"exact payer name from the letter\\\",\\n    \\\"plan_type\\\": \\\"Fully Insured | Self-Funded (ERISA) | Unknown\\\"\\n  },\\n  \\\"provider\\\": {\\n    \\\"name\\\": \\\"treating provider name\\\",\\n    \\\"npi\\\": \\\"NPI if visible\\\"\\n  },\\n  \\\"filing_deadline\\\": \\\"YYYY-MM-DD\\\",\\n  \\\"urgency\\\": \\\"standard | urgent\\\",\\n  \\\"missing_fields\\\": [],\\n  \\\"scan_quality\\\": \\\"good | fair | poor\\\"\\n}\\n\\nRULES:\\n- Extract the EXACT entity/practice name as printed on the denial letter\\n- Extract the EXACT payer name — do NOT assume Optum/UHC\\n- If denial code is not one of the 4 known codes, set to \\\"OTHER\\\" with the raw reason in denial_label\\n- If confidence < 70%, set denial_code to \\\"OTHER\\\"\\n- Calculate filing_deadline as denial_date + 365 days\\n- Do NOT hallucinate — if a field is not visible, add to missing_fields\\n- Report scan_quality based on legibility`;\n\nconst requestBody = {\n  contents: [{\n    role: 'user',\n    parts: [\n      { text: systemPrompt },\n      {\n        inline_data: {\n          mime_type: mimeType,\n          data: base64Content\n        }\n      }\n    ]\n  }],\n  generationConfig: {\n    maxOutputTokens: 4096,\n    temperature: 0.1\n  }\n};\n\nreturn [{\n  json: {\n    request_body: JSON.stringify(requestBody),\n    file_id: fileMetadata.id,\n    file_name: fileName,\n    mime_type: mimeType,\n    source: 'gdrive_scan',\n    google_access_token: fileMetadata.google_access_token || ''\n  }\n}];"
       },
       "id": "prepare-multimodal",
       "name": "Prepare Multimodal Request",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [690, 600]
+      "position": [1570, 500]
     },
     {
       "parameters": {
@@ -143,18 +211,18 @@
       "name": "File Type Valid?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [910, 600]
+      "position": [1790, 500]
     },
     {
       "parameters": {
         "method": "POST",
         "url": "https://us-east1-aiplatform.googleapis.com/v1/projects/{{ $env.GCP_PROJECT_ID }}/locations/us-east1/publishers/google/models/gemini-2.5-pro:generateContent",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleApi",
+        "authentication": "noAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Content-Type", "value": "application/json" }
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "=Bearer {{ $('Get Google Token (Scan Path)').first().json.google_access_token }}" }
           ]
         },
         "sendBody": true,
@@ -166,13 +234,7 @@
       "name": "Gemini — Classify Scanned Denial",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1130, 500],
-      "credentials": {
-        "googleApi": {
-          "id": "CONFIGURE_ME",
-          "name": "Google Cloud — Vertex AI"
-        }
-      }
+      "position": [2010, 500]
     },
     {
       "parameters": {
@@ -182,7 +244,7 @@
       "name": "Parse Scan Classification",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1350, 500]
+      "position": [2230, 500]
     },
     {
       "parameters": {
@@ -202,28 +264,26 @@
       "name": "Scan Parsed OK?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [1570, 500]
+      "position": [2450, 500]
     },
     {
       "parameters": {
-        "operation": "update",
-        "fileId": "={{ $json.file_id }}",
-        "options": {
-          "addParents": "={{ $env.GOOGLE_DRIVE_PROCESSED_DENIALS_ID }}",
-          "removeParents": "={{ $env.GOOGLE_DRIVE_DENIAL_INBOX_ID }}"
-        }
+        "method": "PATCH",
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $json.file_id }}?addParents={{ $env.GOOGLE_DRIVE_PROCESSED_DENIALS_ID }}&removeParents={{ $env.GOOGLE_DRIVE_DENIAL_INBOX_ID }}",
+        "authentication": "noAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $('Get Google Token (Scan Path)').first().json.google_access_token }}" }
+          ]
+        },
+        "options": { "timeout": 30000 }
       },
       "id": "gdrive-move-processed",
       "name": "Google Drive — Move to Processed",
-      "type": "n8n-nodes-base.googleDrive",
-      "typeVersion": 3,
-      "position": [1790, 420],
-      "credentials": {
-        "googleApi": {
-          "id": "CONFIGURE_ME",
-          "name": "Google Cloud — Drive/Docs"
-        }
-      }
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2670, 420]
     },
     {
       "parameters": {
@@ -233,28 +293,26 @@
       "name": "Forward Scan Data",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2010, 420]
+      "position": [2890, 420]
     },
     {
       "parameters": {
-        "operation": "update",
-        "fileId": "={{ $json.file_id }}",
-        "options": {
-          "addParents": "={{ $env.GOOGLE_DRIVE_FAILED_DENIALS_ID }}",
-          "removeParents": "={{ $env.GOOGLE_DRIVE_DENIAL_INBOX_ID }}"
-        }
+        "method": "PATCH",
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $json.file_id || $('Prepare Multimodal Request').first().json.file_id }}?addParents={{ $env.GOOGLE_DRIVE_FAILED_DENIALS_ID }}&removeParents={{ $env.GOOGLE_DRIVE_DENIAL_INBOX_ID }}",
+        "authentication": "noAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $('Get Google Token (Scan Path)').first().json.google_access_token }}" }
+          ]
+        },
+        "options": { "timeout": 30000 }
       },
       "id": "gdrive-move-failed",
       "name": "Google Drive — Move to Failed",
-      "type": "n8n-nodes-base.googleDrive",
-      "typeVersion": 3,
-      "position": [1790, 650],
-      "credentials": {
-        "googleApi": {
-          "id": "CONFIGURE_ME",
-          "name": "Google Cloud — Drive/Docs"
-        }
-      }
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2670, 700]
     },
     {
       "parameters": {
@@ -269,7 +327,7 @@
       "name": "RingCentral — Scan Parse Failed",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2010, 650]
+      "position": [2890, 700]
     },
     {
       "parameters": {
@@ -318,14 +376,24 @@
     },
     {
       "parameters": {
+        "jsCode": "// Get Google OAuth2 access token from service account\nconst crypto = require('crypto');\n\nconst saJson = $env.GOOGLE_SERVICE_ACCOUNT_JSON;\nif (!saJson) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON env var not set');\n\nconst sa = JSON.parse(saJson);\n\nconst header = { alg: 'RS256', typ: 'JWT' };\nconst now = Math.floor(Date.now() / 1000);\nconst payload = {\n  iss: sa.client_email,\n  scope: 'https://www.googleapis.com/auth/cloud-platform',\n  aud: 'https://oauth2.googleapis.com/token',\n  iat: now,\n  exp: now + 3600\n};\n\nconst b64url = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');\nconst unsigned = b64url(header) + '.' + b64url(payload);\n\nconst sign = crypto.createSign('RSA-SHA256');\nsign.update(unsigned);\nconst signature = sign.sign(sa.private_key, 'base64url');\n\nconst jwt = unsigned + '.' + signature;\n\nconst resp = await this.helpers.httpRequest({\n  method: 'POST',\n  url: 'https://oauth2.googleapis.com/token',\n  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },\n  body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`\n});\n\n// Pass through the input data + token\nconst inputData = $input.first().json;\nreturn [{ json: { ...inputData, google_access_token: resp.access_token } }];"
+      },
+      "id": "get-google-token-text",
+      "name": "Get Google Token (Text Path)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 800]
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "https://us-east1-aiplatform.googleapis.com/v1/projects/{{ $env.GCP_PROJECT_ID }}/locations/us-east1/publishers/google/models/gemini-2.5-pro:generateContent",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleApi",
+        "authentication": "noAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Content-Type", "value": "application/json" }
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "=Bearer {{ $json.google_access_token }}" }
           ]
         },
         "sendBody": true,
@@ -337,13 +405,7 @@
       "name": "Gemini — Classify Denial (Text)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [910, 900],
-      "credentials": {
-        "googleApi": {
-          "id": "CONFIGURE_ME",
-          "name": "Google Cloud — Vertex AI"
-        }
-      }
+      "position": [1130, 800]
     },
     {
       "parameters": {
@@ -353,7 +415,7 @@
       "name": "Parse Classification",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1130, 900]
+      "position": [1350, 800]
     },
     {
       "parameters": {
@@ -373,17 +435,17 @@
       "name": "Entity Lookup",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2230, 420]
+      "position": [3110, 420]
     },
     {
       "parameters": {
         "method": "POST",
         "url": "https://api.monday.com/v2",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "authentication": "noAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
+            { "name": "Authorization", "value": "={{ $env.MONDAY_API_TOKEN }}" },
             { "name": "API-Version", "value": "2024-10" }
           ]
         },
@@ -396,13 +458,7 @@
       "name": "Monday.com — Check Duplicate",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2450, 420],
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "CONFIGURE_ME",
-          "name": "Monday.com API"
-        }
-      },
+      "position": [3330, 420],
       "continueOnFail": true
     },
     {
@@ -413,7 +469,7 @@
       "name": "Evaluate Duplicate",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2670, 420]
+      "position": [3550, 420]
     },
     {
       "parameters": {
@@ -433,7 +489,7 @@
       "name": "Is Duplicate?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [2890, 420]
+      "position": [3770, 420]
     },
     {
       "parameters": {
@@ -443,17 +499,17 @@
       "name": "Build Monday.com Item",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3110, 340]
+      "position": [3990, 340]
     },
     {
       "parameters": {
         "method": "POST",
         "url": "https://api.monday.com/v2",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "authentication": "noAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
+            { "name": "Authorization", "value": "={{ $env.MONDAY_API_TOKEN }}" },
             { "name": "API-Version", "value": "2024-10" }
           ]
         },
@@ -466,13 +522,7 @@
       "name": "Monday.com — Create Item",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [3330, 340],
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "CONFIGURE_ME",
-          "name": "Monday.com API"
-        }
-      }
+      "position": [4210, 340]
     },
     {
       "parameters": {
@@ -482,7 +532,7 @@
       "name": "Prepare Alert",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3550, 340]
+      "position": [4430, 340]
     },
     {
       "parameters": {
@@ -497,7 +547,7 @@
       "name": "RingCentral — New Denial Alert",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [3770, 340]
+      "position": [4650, 340]
     },
     {
       "parameters": {
@@ -507,7 +557,7 @@
       "name": "Prepare Duplicate Alert",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3110, 550]
+      "position": [3990, 550]
     },
     {
       "parameters": {
@@ -522,7 +572,7 @@
       "name": "RingCentral — Duplicate Alert",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [3330, 550]
+      "position": [4210, 550]
     },
     {
       "parameters": {
@@ -564,7 +614,28 @@
     },
     "Google Drive — Watch Denial Inbox": {
       "main": [
-        [{ "node": "Google Drive — Download Scanned File", "type": "main", "index": 0 }]
+        [{ "node": "Get Google Token (Scan Path)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Google Token (Scan Path)": {
+      "main": [
+        [{ "node": "Google Drive — List Inbox Files", "type": "main", "index": 0 }]
+      ]
+    },
+    "Google Drive — List Inbox Files": {
+      "main": [
+        [{ "node": "Split Inbox Files", "type": "main", "index": 0 }]
+      ]
+    },
+    "Split Inbox Files": {
+      "main": [
+        [{ "node": "Has Inbox Files?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Has Inbox Files?": {
+      "main": [
+        [{ "node": "Google Drive — Download Scanned File", "type": "main", "index": 0 }],
+        []
       ]
     },
     "Google Drive — Download Scanned File": {
@@ -626,8 +697,13 @@
     },
     "Needs AI Classification?": {
       "main": [
-        [{ "node": "Gemini — Classify Denial (Text)", "type": "main", "index": 0 }],
+        [{ "node": "Get Google Token (Text Path)", "type": "main", "index": 0 }],
         [{ "node": "Use Structured Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Google Token (Text Path)": {
+      "main": [
+        [{ "node": "Gemini — Classify Denial (Text)", "type": "main", "index": 0 }]
       ]
     },
     "Gemini — Classify Denial (Text)": {
@@ -706,11 +782,11 @@
     "overview": "Three intake paths: (A) DrChrono ERA/835 polling 2x/day, (B) Google Drive scan-and-drop for paper denials, (C) Manual webhook fallback. All paths converge at Entity Lookup → Duplicate Check → Monday.com creation. Handles unknown payers and unknown denial codes by routing to Manual Review.",
     "setup_steps": [
       "1. Import this workflow into your n8n instance",
-      "2. Configure Google Cloud credentials (Vertex AI + Drive/Docs)",
-      "3. Configure Monday.com HTTP Header Auth credential",
-      "4. Configure DrChrono HTTP Header Auth credential",
-      "5. Edit n8n/ecosystem.config.js — fill in all CONFIGURE_ME values (GCP project, Drive folder IDs, RingCentral webhook, etc.)",
-      "6. Edit config/entities.json — fill in real entity data (ecosystem.config.js auto-loads it)",
+      "2. Set GOOGLE_SERVICE_ACCOUNT_JSON env var with the full service account JSON (Vertex AI + Drive/Docs scopes)",
+      "3. Set MONDAY_API_TOKEN env var with your Monday.com API token",
+      "4. Set DRCHRONO_API_TOKEN env var with your DrChrono Bearer token",
+      "5. Edit n8n/ecosystem.config.js — fill in all CONFIGURE_ME values (GCP_PROJECT_ID, Drive folder IDs, RingCentral webhook, etc.)",
+      "6. Edit config/entities.json — fill in real entity data (ecosystem.config.js auto-loads it as ENTITIES_CONFIG)",
       "7. Start n8n via PM2: pm2 start n8n/ecosystem.config.js",
       "8. Create Google Drive folders: Denial Inbox, Processed Denials, Failed Denials",
       "9. Monday.com columns already exist: text_mm0gr7ga (Entity Name), text_mm0gv12z (Entity NPI), text_mm0gw2sh (Payer Name)",
