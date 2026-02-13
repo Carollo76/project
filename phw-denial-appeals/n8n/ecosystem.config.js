@@ -16,6 +16,7 @@
 // ============================================================
 
 const path = require('path');
+const fs = require('fs');
 
 // Auto-load entities config from the JSON file
 // Edit config/entities.json directly — changes take effect on pm2 restart
@@ -29,6 +30,18 @@ try {
   console.error('Entity lookup will not work until this is fixed.');
 }
 
+// Auto-load Google service account key from JSON file
+// Place your service account key at: config/google-service-account.json
+// Share your Google Drive folders with the service account email (client_email in the JSON)
+const saPath = path.join(__dirname, '..', 'config', 'google-service-account.json');
+let googleServiceAccountJson = '';
+try {
+  googleServiceAccountJson = fs.readFileSync(saPath, 'utf8').trim();
+} catch (e) {
+  console.error('WARNING: Could not load google-service-account.json from', saPath);
+  console.error('Google API calls (Gemini, Drive, Docs) will not work until this is fixed.');
+}
+
 module.exports = {
   apps: [{
     name: 'n8n',
@@ -39,6 +52,21 @@ module.exports = {
     min_uptime: '60s',
     // Set all env vars here — n8n reads these via $env.VARIABLE_NAME
     env: {
+      // ---- API Credentials ----
+      // Monday.com: Your personal API token
+      // Get it: monday.com → Avatar → Developers → My Access Tokens → "API v2 Token"
+      MONDAY_API_TOKEN: 'CONFIGURE_ME',
+
+      // DrChrono: OAuth2 bearer token
+      // Get it: DrChrono → API settings → Generate token
+      DRCHRONO_API_TOKEN: 'CONFIGURE_ME',
+
+      // Google Cloud: Service account key (auto-loaded from file)
+      // Place the JSON key file at: config/google-service-account.json
+      // Required roles: Vertex AI User, Drive API, Docs API
+      // Share Drive folders with the service account's client_email
+      GOOGLE_SERVICE_ACCOUNT_JSON: googleServiceAccountJson,
+
       // ---- Google Cloud ----
       GCP_PROJECT_ID: 'CONFIGURE_ME',
 

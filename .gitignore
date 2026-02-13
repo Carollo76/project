@@ -44,6 +44,9 @@ portfolio_data.json
 !phw-denial-appeals/config/*.json
 !phw-denial-appeals/n8n/workflows/*.json
 
+# NEVER commit service account keys or credentials
+phw-denial-appeals/config/google-service-account.json
+
 # OS
 .DS_Store
 Thumbs.db

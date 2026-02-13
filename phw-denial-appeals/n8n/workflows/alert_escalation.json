@@ -35,11 +35,14 @@
       "parameters": {
         "method": "POST",
         "url": "https://api.monday.com/v2",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "authentication": "noAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $env.MONDAY_API_TOKEN }}"
+            },
             {
               "name": "API-Version",
               "value": "2024-10"
@@ -57,13 +60,7 @@
       "name": "Monday.com — Fetch All Items",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [500, 200],
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "CONFIGURE_ME",
-          "name": "Monday.com API"
-        }
-      }
+      "position": [500, 200]
     },
     {
       "parameters": {
@@ -172,11 +169,14 @@
       "parameters": {
         "method": "POST",
         "url": "https://api.monday.com/v2",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "authentication": "noAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $env.MONDAY_API_TOKEN }}"
+            },
             {
               "name": "API-Version",
               "value": "2024-10"
@@ -194,13 +194,7 @@
       "name": "Monday.com — Fetch Item for Escalation",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [940, 400],
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "CONFIGURE_ME",
-          "name": "Monday.com API"
-        }
-      }
+      "position": [940, 400]
     },
     {
       "parameters": {
@@ -271,11 +265,14 @@
       "parameters": {
         "method": "POST",
         "url": "https://api.monday.com/v2",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "authentication": "noAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $env.MONDAY_API_TOKEN }}"
+            },
             {
               "name": "API-Version",
               "value": "2024-10"
@@ -293,13 +290,7 @@
       "name": "Monday.com — Move to Resolved",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1380, 620],
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "CONFIGURE_ME",
-          "name": "Monday.com API"
-        }
-      }
+      "position": [1380, 620]
     },
     {
       "parameters": {
@@ -396,8 +387,8 @@
     "overview": "Two triggers: (1) Daily 7 AM cron checks all open items for approaching filing deadlines (30/14/7 days) and sends RingCentral alerts. (2) Monday.com webhook on status change handles escalation routing (Fully Insured → NY DFS, ERISA → Federal review) and auto-moves Won/Lost items to Resolved group.",
     "setup_steps": [
       "1. Import this workflow into your n8n instance",
-      "2. Configure Monday.com HTTP Header Auth credential",
-      "3. Set env var: RINGCENTRAL_WEBHOOK_DENIALS = your RingCentral webhook URL",
+      "2. All credentials are injected via PM2 env vars — no n8n credential UI needed",
+      "3. Set MONDAY_API_TOKEN and RINGCENTRAL_WEBHOOK_DENIALS in ecosystem.config.js",
       "4. In Monday.com board settings, create a webhook that fires on Appeal Status changes and points to this workflow's Status Change webhook URL",
       "5. Activate the workflow — cron will run daily at 7 AM"
     ],
